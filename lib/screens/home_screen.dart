@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../format.dart';
+import '../icons.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
@@ -283,6 +284,38 @@ class _TransactionsTabState extends State<TransactionsTab> {
             ),
           ),
         ),
+        // Untung/rugi kategori "masuk & keluar" yang aktif di periode ini.
+        if (_walletFilter == null)
+          for (final c in s.bothCategories)
+            if (s.categoryNet(_period, c.id)
+                case final n when n.income > 0 || n.expense > 0)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      leading: CircleIcon(icon: c.icon, color: c.color),
+                      title: Text('Untung/rugi ${c.name}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(
+                          'Masuk ${money(n.income)} · Keluar ${money(n.expense)}'),
+                      trailing: Text(
+                        '${n.net >= 0 ? 'Untung' : 'Minus'}\n${money(n.net.abs())}',
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: n.net >= 0 ? kIncomeColor : kExpenseColor),
+                      ),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => TrendScreen(
+                                  mode: TrendMode.profit, categoryId: c.id))),
+                    ),
+                  ),
+                ),
+              ),
         if (list.isEmpty)
           const SliverToBoxAdapter(
             child: EmptyState(

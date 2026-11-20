@@ -58,20 +58,44 @@ class _CatList extends StatelessWidget {
   Widget _list(BuildContext context) {
     final s = AppStore.I;
     final cats = s.categoriesOf(type);
+    final period = s.currentPeriod;
     return ListView(
       padding: const EdgeInsets.only(bottom: 96),
       children: cats.map((c) {
-        final used = s.categoryUsage(c.id);
+        // Kategori "masuk & keluar": tiap tab hanya menghitung sisinya
+        // sendiri, jadi angka di tab Pengeluaran & Pemasukan berbeda.
+        final used = s.categoryUsage(c.id, type: c.both ? type : null);
+        final net = c.both ? s.categoryNet(period, c.id) : null;
+        final side = type == TxType.income ? net?.income : net?.expense;
         return ListTile(
           leading: CircleIcon(icon: c.icon, color: c.color),
           title: Text(c.name),
-          subtitle: Row(children: [
-            Text('$used transaksi'),
-            if (c.both) ...[
-              const SizedBox(width: 8),
-              const _BothBadge(),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Text(c.both
+                    ? '$used ${type == TxType.income ? 'pemasukan' : 'pengeluaran'}'
+                    : '$used transaksi'),
+                if (c.both) ...[
+                  const SizedBox(width: 8),
+                  const _BothBadge(),
+                ],
+              ]),
+              if (net != null)
+                Text(
+                  '${type == TxType.income ? 'Masuk' : 'Keluar'} periode ini ${money(side!)}'
+                  ' · ${net.net >= 0 ? 'Untung' : 'Minus'} ${money(net.net.abs())}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: net.net >= 0 ? kIncomeColor : kExpenseColor,
+                  ),
+                ),
             ],
-          ]),
+          ),
+          isThreeLine: net != null,
           trailing: IconButton(
             icon: const Icon(Icons.delete_outline_rounded),
             onPressed: () => _delete(context, c),
@@ -183,6 +207,8 @@ Future<void> editCategory(BuildContext context,
           onSave: () async {
             final n = name.text.trim();
             if (n.isEmpty) return;
+            final twin = AppStore.I.sameNameOther(
+                n, edit?.type ?? type, exceptId: edit?.id);
             await AppStore.I.upsertCategory(Category(
               id: edit?.id ?? newId(),
               name: n,
@@ -192,6 +218,10 @@ Future<void> editCategory(BuildContext context,
               both: both,
             ));
             if (ctx.mounted) Navigator.pop(ctx);
+            if (twin != null && context.mounted) {
+              toast(context,
+                  '"$n" digabung jadi kategori Masuk & Keluar, untung/ruginya kini terhitung');
+            }
           },
         ),
       ),

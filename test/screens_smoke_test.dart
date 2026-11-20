@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:goes_to_financial_freedom/main.dart';
 import 'package:goes_to_financial_freedom/models.dart';
 import 'package:goes_to_financial_freedom/screens/asset_screens.dart';
 import 'package:goes_to_financial_freedom/screens/categories_screen.dart';
 import 'package:goes_to_financial_freedom/screens/home_screen.dart';
+import 'package:goes_to_financial_freedom/screens/settings_screen.dart';
 import 'package:goes_to_financial_freedom/screens/trend_screen.dart';
 import 'package:goes_to_financial_freedom/store.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -34,7 +36,8 @@ Future<void> _seed() async {
       sellDate: now, sellWalletId: cash.id));
 }
 
-Widget _wrap(Widget w) => MaterialApp(home: w);
+Widget _wrap(Widget w) =>
+    MaterialApp(theme: FinFreeApp.theme(Brightness.light), home: w);
 
 void main() {
   setUp(_seed);
@@ -50,7 +53,11 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.byTooltip('Bulan sebelumnya'));
       await t.pumpAndSettle();
-      expect(t.takeException(), isNull);
+      final e = t.takeException();
+      if (e is FlutterError) {
+        debugPrint('EXC: ${e.toStringDeep()}');
+      }
+      expect(e, isNull);
     });
   }
 
@@ -113,5 +120,83 @@ void main() {
     await t.pumpAndSettle();
     await t.pumpWidget(_wrap(const CategoriesScreen()));
     await t.pumpAndSettle();
+    expect(s.categoryUsage(c.id, type: TxType.expense), 1);
+    expect(s.categoryUsage(c.id, type: TxType.income), 1);
+    final list = find.descendant(
+        of: find.byType(ListView).first, matching: find.byType(Scrollable)).first;
+    await t.scrollUntilVisible(find.text('Usaha Laundry'), 200, scrollable: list);
+    expect(find.textContaining('Keluar periode ini Rp'), findsOneWidget);
+    expect(find.textContaining('Minus Rp'), findsWidgets);
+    await t.tap(find.text('Pemasukan').last);
+    await t.pumpAndSettle();
+    final list2 = find.descendant(
+        of: find.byType(ListView).last, matching: find.byType(Scrollable)).first;
+    await t.scrollUntilVisible(find.text('Usaha Laundry'), 200, scrollable: list2);
+    expect(find.textContaining('Masuk periode ini Rp'), findsOneWidget);
+  });
+
+  testWidgets('huruf HP diperbesar (1.15x) tidak bikin teks meluber', (t) async {
+    t.view.physicalSize = const Size(1080, 2400);
+    t.view.devicePixelRatio = 2.75;
+    for (final w in <Widget>[
+      const HomeScreen(),
+      const TrendScreen(),
+      const TrendScreen(mode: TrendMode.expense),
+      const CategoriesScreen(),
+      const ItemDetailScreen(itemId: 'i1'),
+    ]) {
+      await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: Builder(
+          builder: (c) => MediaQuery(
+            data: MediaQuery.of(c)
+                .copyWith(textScaler: const TextScaler.linear(1.15)),
+            child: w,
+          ),
+        ),
+      ));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull, reason: '$w');
+    }
+  });
+
+  testWidgets('ganti tema warna & mode gelap, tersimpan', (t) async {
+    t.view.physicalSize = const Size(1080, 2400);
+    t.view.devicePixelRatio = 2.75;
+    final s = AppStore.I;
+    await t.pumpWidget(const FinFreeApp());
+    await t.pumpAndSettle();
+    await t.tap(find.text('Atur'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Tema warna'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Ungu'));
+    await t.tap(find.text('Gelap'));
+    await t.pumpAndSettle();
+    expect(s.themeColor.value, 0xFF6A1B9A);
+    expect(s.themeMode.value, 'dark');
+    final ctx = t.element(find.byType(SettingsScreen));
+    expect(Theme.of(ctx).brightness, Brightness.dark);
+    expect(t.takeException(), isNull);
+
+    // tersimpan: muat ulang dari penyimpanan
+    s.themeColor.value = 0;
+    s.themeMode.value = 'system';
+    await s.load();
+    expect(s.themeColor.value, 0xFF6A1B9A);
+    expect(s.themeMode.value, 'dark');
+
+    // layar utama aman di mode gelap
+    for (final w in <Widget>[
+      const HomeScreen(),
+      const TrendScreen(),
+      const ItemDetailScreen(itemId: 'i1'),
+    ]) {
+      await t.pumpWidget(MaterialApp(
+          theme: FinFreeApp.theme(Brightness.dark, s.themeColor.value),
+          home: w));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull, reason: '$w');
+    }
   });
 }

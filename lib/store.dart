@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart' show ChangeNotifier;
+import 'package:flutter/foundation.dart' show ChangeNotifier, ValueNotifier;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,6 +10,7 @@ import 'format.dart';
 import 'models.dart';
 
 const _uuid = Uuid();
+const kDefaultThemeColor = 0xFF0F766E;
 String newId() => _uuid.v4();
 
 /// Penyimpanan lokal (offline) seluruh data aplikasi.
@@ -34,6 +35,12 @@ class AppStore extends ChangeNotifier {
   String? lastIncomeCategoryId;
   String? lastWalletId;
 
+  /// Tampilan: warna tema & mode terang/gelap ('system' | 'light' | 'dark').
+  /// Dipisah sebagai notifier sendiri agar MaterialApp hanya rebuild saat
+  /// tema berubah, bukan setiap ada transaksi baru.
+  final themeColor = ValueNotifier<int>(kDefaultThemeColor);
+  final themeMode = ValueNotifier<String>('system');
+
   // keamanan
   String? _pinHash;
   String _pinSalt = '';
@@ -49,6 +56,7 @@ class AppStore extends ChangeNotifier {
       await _save();
     } else {
       _fromJson(jsonDecode(raw) as Map<String, dynamic>, notify: false);
+      if (_mergeSameName()) await _save();
     }
     final sec = _prefs.getString(_kSecurity);
     if (sec != null) {
@@ -110,6 +118,8 @@ class AppStore extends ChangeNotifier {
           'lastExpenseCategoryId': lastExpenseCategoryId,
           'lastIncomeCategoryId': lastIncomeCategoryId,
           'lastWalletId': lastWalletId,
+          'themeColor': themeColor.value,
+          'themeMode': themeMode.value,
         },
       };
 
@@ -119,12 +129,14 @@ class AppStore extends ChangeNotifier {
         (j['categories'] as List).map((e) => Category.fromJson(e)).toList();
     txns = (j['txns'] as List).map((e) => Txn.fromJson(e)).toList();
     items = ((j['items'] ?? []) as List).map((e) => Item.fromJson(e)).toList();
-    final s = (j['settings'] ?? {}) as Map<String, dynamic>;
+    final s = (j['settings'] ?? <String, dynamic>{}) as Map<String, dynamic>;
     cycleStartDay = s['cycleStartDay'] ?? 1;
     hideBalance = s['hideBalance'] ?? false;
     lastExpenseCategoryId = s['lastExpenseCategoryId'];
     lastIncomeCategoryId = s['lastIncomeCategoryId'];
     lastWalletId = s['lastWalletId'];
+    themeColor.value = s['themeColor'] ?? kDefaultThemeColor;
+    themeMode.value = s['themeMode'] ?? 'system';
     _sortTxns();
     if (notify) notifyListeners();
   }
@@ -218,7 +230,7 @@ class AppStore extends ChangeNotifier {
 
   Category _ensureCategory(String name, TxType type, String icon, int color) {
     final c = categories
-        .where((c) => c.type == type && c.name == name)
+        .where((c) => c.usableFor(type) && c.name == name)
         .firstOrNull;
     if (c != null) return c;
     final n = Category(id: newId(), name: name, type: type, icon: icon, color: color);
@@ -397,10 +409,60 @@ class AppStore extends ChangeNotifier {
   Future<void> upsertCategory(Category c) async {
     final i = categories.indexWhere((e) => e.id == c.id);
     i >= 0 ? categories[i] = c : categories.add(c);
+    _mergeSameName(prefer: c.id);
     await _commit();
   }
 
-  int categoryUsage(String id) => txns.where((t) => t.categoryId == id).length;
+  /// Kategori bernama sama di Pengeluaran & Pemasukan (mis. "Laundry" di
+  /// keduanya) digabung jadi SATU kategori "masuk & keluar", supaya
+  /// untung/ruginya bisa dihitung. Transaksinya dipindah ke kategori gabungan.
+  /// "Lainnya" dikecualikan karena memang wajar ada di dua sisi.
+  bool _mergeSameName({String? prefer}) {
+    var changed = false;
+    final keepBy = <String, Category>{};
+    final ordered = [
+      ...categories.where((c) => c.id == prefer),
+      ...categories.where((c) => c.id != prefer),
+    ];
+    for (final c in ordered) {
+      final key = c.name.trim().toLowerCase();
+      if (key.isEmpty || key == 'lainnya') continue;
+      final keep = keepBy[key];
+      if (keep == null) {
+        keepBy[key] = c;
+        continue;
+      }
+      // dua kategori satu sisi yang sama persis: biarkan (bukan masuk & keluar)
+      if (!keep.both && !c.both && keep.type == c.type) continue;
+      keep.both = true;
+      for (final t in txns) {
+        if (t.categoryId == c.id) t.categoryId = keep.id;
+      }
+      if (lastExpenseCategoryId == c.id) lastExpenseCategoryId = keep.id;
+      if (lastIncomeCategoryId == c.id) lastIncomeCategoryId = keep.id;
+      categories.removeWhere((e) => e.id == c.id);
+      changed = true;
+    }
+    return changed;
+  }
+
+  /// Kategori yang punya nama sama di sisi lain (calon digabung).
+  Category? sameNameOther(String name, TxType type, {String? exceptId}) {
+    final key = name.trim().toLowerCase();
+    if (key.isEmpty || key == 'lainnya') return null;
+    return categories
+        .where((c) =>
+            c.id != exceptId &&
+            c.name.trim().toLowerCase() == key &&
+            (c.both || c.type != type))
+        .firstOrNull;
+  }
+
+  /// Jumlah transaksi kategori; [type] untuk menghitung satu sisi saja
+  /// (berguna untuk kategori "masuk & keluar").
+  int categoryUsage(String id, {TxType? type}) => txns
+      .where((t) => t.categoryId == id && (type == null || t.type == type))
+      .length;
 
   /// Hapus kategori; transaksinya dipindah ke [moveTo] (jika ada).
   Future<void> deleteCategory(String id, {String? moveTo}) async {
@@ -415,6 +477,16 @@ class AppStore extends ChangeNotifier {
   Future<void> setCycleStartDay(int d) async {
     cycleStartDay = d.clamp(1, 28);
     await _commit();
+  }
+
+  Future<void> setThemeColor(int c) async {
+    themeColor.value = c;
+    await _save();
+  }
+
+  Future<void> setThemeMode(String m) async {
+    themeMode.value = m;
+    await _save();
   }
 
   Future<void> toggleHideBalance() async {

@@ -185,11 +185,11 @@ class _TxFormScreenState extends State<TxFormScreen> {
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _save(),
             style: TextStyle(
-                fontSize: 32, fontWeight: FontWeight.w700, color: color),
+                fontSize: 28, fontWeight: FontWeight.w700, color: color),
             decoration: InputDecoration(
               prefixText: 'Rp ',
               prefixStyle: TextStyle(
-                  fontSize: 32, fontWeight: FontWeight.w700, color: color),
+                  fontSize: 28, fontWeight: FontWeight.w700, color: color),
               hintText: '0',
             ),
           ),

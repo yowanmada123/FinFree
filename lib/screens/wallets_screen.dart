@@ -39,7 +39,7 @@ class WalletsScreen extends StatelessWidget {
                 Text(money(s.totalBalance + s.totalAssets),
                     style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 28,
+                        fontSize: 24,
                         fontWeight: FontWeight.w800)),
                 const SizedBox(height: 14),
                 Row(children: [
@@ -354,7 +354,7 @@ class WalletDetailScreen extends StatelessWidget {
                       Text(money(s.walletBalance(w.id)),
                           style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 28,
+                              fontSize: 24,
                               fontWeight: FontWeight.w800)),
                       Text('Saldo awal ${money(w.initialBalance)}',
                           style: const TextStyle(color: Colors.white70)),

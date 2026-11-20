@@ -79,7 +79,7 @@ class _StatusChip extends StatelessWidget {
       child: Text(sold ? 'TERJUAL' : 'STOK',
           style: TextStyle(
               color: c,
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.8)),
     );
@@ -171,7 +171,7 @@ class _AmountField extends StatelessWidget {
         keyboardType: TextInputType.number,
         inputFormatters: [ThousandsFormatter()],
         onChanged: onChanged,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         decoration: InputDecoration(
           labelText: label,
           helperText: helper,
@@ -349,7 +349,7 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
                     Text(money(sum.stockValue),
                         style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 28,
+                            fontSize: 24,
                             fontWeight: FontWeight.w800)),
                     const SizedBox(height: 16),
                     Row(children: [
@@ -605,7 +605,7 @@ class ItemDetailScreen extends StatelessWidget {
                         child: Text(i.name,
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 20,
+                                fontSize: 17,
                                 fontWeight: FontWeight.w800)),
                       ),
                       Container(
@@ -645,7 +645,7 @@ class ItemDetailScreen extends StatelessWidget {
                           : shown.abs()),
                       style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 32,
+                          fontSize: 26,
                           fontWeight: FontWeight.w800),
                     ),
                     if (i.sold || i.targetPrice > 0)
@@ -692,16 +692,22 @@ class ItemDetailScreen extends StatelessWidget {
                   const Divider(),
                   Row(children: [
                     Expanded(
+                      flex: 2,
                       child: Text(
                           i.sold ? 'Hasil' : 'Perkiraan hasil',
                           style: tt.titleSmall),
                     ),
-                    if (i.sold)
-                      ProfitBadge(i.profit, large: true)
-                    else if (i.targetPrice > 0)
-                      ProfitBadge(i.potentialProfit, large: true)
-                    else
-                      const Text('-'),
+                    Flexible(
+                      flex: 3,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: i.sold
+                            ? ProfitBadge(i.profit, large: true)
+                            : i.targetPrice > 0
+                                ? ProfitBadge(i.potentialProfit, large: true)
+                                : const Text('-'),
+                      ),
+                    ),
                   ]),
                 ],
               ),
@@ -1153,7 +1159,7 @@ class _PreviewCard extends StatelessWidget {
             ),
             Text(rupiah(p.abs()),
                 style: TextStyle(
-                    color: c, fontWeight: FontWeight.w800, fontSize: 18)),
+                    color: c, fontWeight: FontWeight.w800, fontSize: 16)),
           ]),
           if (cost > 0)
             Align(

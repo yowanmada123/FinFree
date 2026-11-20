@@ -228,7 +228,7 @@ class _TrendScreenState extends State<TrendScreen> {
                             : money(last),
                         style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 30,
+                            fontSize: 24,
                             fontWeight: FontWeight.w800)),
                     const SizedBox(height: 6),
                     DeltaPill(
@@ -389,8 +389,12 @@ class _TrendScreenState extends State<TrendScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                Text(p.label,
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                Flexible(
+                  child: Text(p.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                ),
                 if (isCurrent) ...[
                   const SizedBox(width: 6),
                   Container(
@@ -403,6 +407,7 @@ class _TrendScreenState extends State<TrendScreen> {
                     child: Text('berjalan', style: tt.labelSmall),
                   ),
                 ],
+                const SizedBox(width: 8),
                 const Spacer(),
                 Text(isProfit ? money(v, sign: true) : money(v),
                     style: TextStyle(

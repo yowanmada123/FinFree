@@ -18,7 +18,8 @@ class SettingsScreen extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 24),
             child: Text(
-                'Pilih tanggal gajian Anda. Laporan bulanan akan dihitung mulai tanggal ini.'),
+              'Pilih tanggal gajian Anda. Laporan bulanan akan dihitung mulai tanggal ini.',
+            ),
           ),
           const SizedBox(height: 8),
           SizedBox(
@@ -37,11 +38,12 @@ class SettingsScreen extends StatelessWidget {
                     backgroundColor: sel
                         ? Theme.of(c).colorScheme.primary
                         : Colors.transparent,
-                    child: Text('$day',
-                        style: TextStyle(
-                            color: sel
-                                ? Theme.of(c).colorScheme.onPrimary
-                                : null)),
+                    child: Text(
+                      '$day',
+                      style: TextStyle(
+                        color: sel ? Theme.of(c).colorScheme.onPrimary : null,
+                      ),
+                    ),
                   ),
                 );
               }),
@@ -57,14 +59,18 @@ class SettingsScreen extends StatelessWidget {
     final s = AppStore.I;
     if (on) {
       final pin = await Navigator.push<String>(
-          context, MaterialPageRoute(builder: (_) => const PinSetupScreen()));
+        context,
+        MaterialPageRoute(builder: (_) => const PinSetupScreen()),
+      );
       if (pin != null) {
         await s.setPin(pin);
         if (context.mounted) toast(context, 'PIN aktif');
       }
     } else {
       final ok = await Navigator.push<bool>(
-          context, MaterialPageRoute(builder: (_) => const PinVerifyScreen()));
+        context,
+        MaterialPageRoute(builder: (_) => const PinVerifyScreen()),
+      );
       if (ok == true) {
         await s.setPin(null);
         if (context.mounted) toast(context, 'PIN dinonaktifkan');
@@ -74,10 +80,14 @@ class SettingsScreen extends StatelessWidget {
 
   Future<void> _changePin(BuildContext context) async {
     final ok = await Navigator.push<bool>(
-        context, MaterialPageRoute(builder: (_) => const PinVerifyScreen()));
+      context,
+      MaterialPageRoute(builder: (_) => const PinVerifyScreen()),
+    );
     if (ok != true || !context.mounted) return;
     final pin = await Navigator.push<String>(
-        context, MaterialPageRoute(builder: (_) => const PinSetupScreen()));
+      context,
+      MaterialPageRoute(builder: (_) => const PinSetupScreen()),
+    );
     if (pin != null) {
       await AppStore.I.setPin(pin);
       if (context.mounted) toast(context, 'PIN diperbarui');
@@ -92,8 +102,10 @@ class SettingsScreen extends StatelessWidget {
     }
     if (!await Biometric.available()) {
       if (context.mounted) {
-        toast(context,
-            'Perangkat tidak mendukung / belum ada sidik jari terdaftar');
+        toast(
+          context,
+          'Perangkat tidak mendukung / belum ada sidik jari terdaftar',
+        );
       }
       return;
     }
@@ -114,15 +126,19 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.dashboard_customize_rounded),
             title: const Text('Kategori'),
             subtitle: const Text('Tambah, ubah ikon & warna, hapus'),
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const CategoriesScreen())),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CategoriesScreen()),
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.event_repeat_rounded),
             title: const Text('Tanggal awal periode'),
-            subtitle: Text(s.cycleStartDay == 1
-                ? 'Tanggal 1 (bulan kalender)'
-                : 'Tanggal ${s.cycleStartDay} setiap bulan'),
+            subtitle: Text(
+              s.cycleStartDay == 1
+                  ? 'Tanggal 1 (bulan kalender)'
+                  : 'Tanggal ${s.cycleStartDay} setiap bulan',
+            ),
             onTap: () => _pickCycleDay(context),
           ),
           SwitchListTile(
@@ -131,6 +147,22 @@ class SettingsScreen extends StatelessWidget {
             subtitle: const Text('Saldo & jumlah ditampilkan sebagai •••'),
             value: s.hideBalance,
             onChanged: (_) => s.toggleHideBalance(),
+          ),
+          const _Header('Tampilan'),
+          ListenableBuilder(
+            listenable: Listenable.merge([s.themeColor, s.themeMode]),
+            builder: (context, _) => ListTile(
+              leading: const Icon(Icons.palette_rounded),
+              title: const Text('Tema warna'),
+              subtitle: Text(
+                '${themeName(s.themeColor.value)} · ${_modeLabel(s.themeMode.value)}',
+              ),
+              trailing: CircleAvatar(
+                radius: 12,
+                backgroundColor: Color(s.themeColor.value),
+              ),
+              onTap: () => showThemeSheet(context),
+            ),
           ),
           const _Header('Keamanan'),
           SwitchListTile(
@@ -158,16 +190,24 @@ class SettingsScreen extends StatelessWidget {
             leading: Icon(Icons.cloud_off_rounded),
             title: Text('100% offline'),
             subtitle: Text(
-                'Semua data hanya tersimpan di perangkat ini. Tidak ada server, akun, atau sinkronisasi. Menghapus aplikasi akan menghapus seluruh data.'),
+              'Semua data hanya tersimpan di perangkat ini. Tidak ada server, akun, atau sinkronisasi. Menghapus aplikasi akan menghapus seluruh data.',
+            ),
           ),
           ListTile(
-            leading: Icon(Icons.restart_alt_rounded,
-                color: Theme.of(context).colorScheme.error),
-            title: Text('Hapus semua data',
-                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            leading: Icon(
+              Icons.restart_alt_rounded,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            title: Text(
+              'Hapus semua data',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
             onTap: () async {
-              if (await confirm(context, 'Hapus semua data?',
-                  'Semua transaksi, dompet, dan kategori akan dikembalikan ke awal. Tidak bisa dibatalkan.')) {
+              if (await confirm(
+                context,
+                'Hapus semua data?',
+                'Semua transaksi, dompet, dan kategori akan dikembalikan ke awal. Tidak bisa dibatalkan.',
+              )) {
                 await s.resetAll();
                 if (context.mounted) toast(context, 'Data telah direset');
               }
@@ -175,8 +215,10 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Center(
-            child: Text('FinFree v1.0.0',
-                style: Theme.of(context).textTheme.bodySmall),
+            child: Text(
+              'FinFree v1.0.0',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
           const SizedBox(height: 24),
         ],
@@ -185,16 +227,176 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
+/// Pilihan warna tema (warna dasar; Material 3 menurunkan palet lengkap
+/// yang serasi & kontrasnya terjaga, termasuk untuk mode gelap).
+const kThemePresets = <(String, int)>[
+  ('Hijau Toska', 0xFF0F766E),
+  ('Hijau Daun', 0xFF2E7D32),
+  ('Biru Laut', 0xFF1565C0),
+  ('Biru Langit', 0xFF0288D1),
+  ('Indigo', 0xFF3949AB),
+  ('Ungu', 0xFF6A1B9A),
+  ('Merah Muda', 0xFFC2185B),
+  ('Merah Bata', 0xFFB23A2E),
+  ('Oranye', 0xFFE65100),
+  ('Kuning Emas', 0xFFB8860B),
+  ('Cokelat Kopi', 0xFF6D4C41),
+  ('Abu Grafit', 0xFF455A64),
+];
+
+String themeName(int c) =>
+    kThemePresets.where((p) => p.$2 == c).firstOrNull?.$1 ?? 'Kustom';
+
+String _modeLabel(String m) => switch (m) {
+  'light' => 'Terang',
+  'dark' => 'Gelap',
+  _ => 'Ikuti HP',
+};
+
+Future<void> showThemeSheet(BuildContext context) {
+  final s = AppStore.I;
+  return showModalBottomSheet(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => ListenableBuilder(
+      listenable: Listenable.merge([s.themeColor, s.themeMode]),
+      builder: (ctx, _) {
+        final cs = Theme.of(ctx).colorScheme;
+        final tt = Theme.of(ctx).textTheme;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Tema warna', style: tt.titleLarge),
+                const SizedBox(height: 12),
+                // pratinjau kecil
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [cs.primary, cs.tertiary],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.account_balance_wallet_rounded,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Total saldo  Rp 12.500.000',
+                          style: tt.titleMedium?.copyWith(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 12,
+                  children: [
+                    for (final (name, c) in kThemePresets)
+                      SizedBox(
+                        width: 70,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => s.setThemeColor(c),
+                          child: Column(
+                            children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: Color(c),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    width: 3,
+                                    color: s.themeColor.value == c
+                                        ? cs.onSurface
+                                        : Colors.transparent,
+                                  ),
+                                ),
+                                child: s.themeColor.value == c
+                                    ? const Icon(
+                                        Icons.check_rounded,
+                                        color: Colors.white,
+                                      )
+                                    : null,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                name,
+                                maxLines: 2,
+                                textAlign: TextAlign.center,
+                                style: tt.labelSmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text('Mode', style: tt.titleMedium),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<String>(
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(
+                        value: 'system',
+                        icon: Icon(Icons.brightness_auto_rounded),
+                        label: Text('Ikuti HP'),
+                      ),
+                      ButtonSegment(
+                        value: 'light',
+                        icon: Icon(Icons.light_mode_rounded),
+                        label: Text('Terang'),
+                      ),
+                      ButtonSegment(
+                        value: 'dark',
+                        icon: Icon(Icons.dark_mode_rounded),
+                        label: Text('Gelap'),
+                      ),
+                    ],
+                    selected: {s.themeMode.value},
+                    onSelectionChanged: (v) => s.setThemeMode(v.first),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
 class _Header extends StatelessWidget {
   final String text;
   const _Header(this.text);
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-        child: Text(text,
-            style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.primary,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 }
