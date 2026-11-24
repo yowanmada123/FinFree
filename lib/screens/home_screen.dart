@@ -243,8 +243,6 @@ class _TransactionsTabState extends State<TransactionsTab> {
                     PeriodBar(
                       period: _period,
                       onChanged: (p) => setState(() => _period = p),
-                      onTapLabel: () =>
-                          setState(() => _period = s.currentPeriod),
                     ),
                     Row(
                       children: [

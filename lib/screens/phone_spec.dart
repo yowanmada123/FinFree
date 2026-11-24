@@ -47,7 +47,7 @@ const List<(String, List<String>)> kIphones = [
 
 const kAllStorages = ['32GB', '64GB', '128GB', '256GB', '512GB', '1TB', '2TB'];
 
-const kRegions = ['iBox', 'Inter'];
+const kRegions = ['iBox', 'WiFi Only', 'Beacukai', 'All Op'];
 
 /// Minus yang umum ditemui pada iPhone bekas.
 const kPhoneMinus = [

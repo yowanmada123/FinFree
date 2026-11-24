@@ -22,7 +22,27 @@ class FinFreeApp extends StatelessWidget {
   const FinFreeApp({super.key});
 
   static ThemeData theme(Brightness b, [int seed = kDefaultThemeColor]) {
-    final scheme = ColorScheme.fromSeed(seedColor: Color(seed), brightness: b);
+    final light = b == Brightness.light;
+    // "fidelity" menjaga warna tetap cerah sesuai pilihan (bukan pastel/kusam).
+    // Mode terang: latar abu-biru sangat muda + kartu putih, ala m-banking.
+    var scheme = ColorScheme.fromSeed(
+      seedColor: Color(seed),
+      brightness: b,
+      dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+    );
+    if (light) {
+      scheme = scheme.copyWith(
+        primary: Color(seed),
+        onPrimary: Colors.white,
+        surface: const Color(0xFFF4F7FC),
+        surfaceContainerLowest: Colors.white,
+        surfaceContainerLow: Colors.white,
+        surfaceContainer: const Color(0xFFEFF3F9),
+        surfaceContainerHigh: const Color(0xFFE9EEF6),
+        surfaceContainerHighest: const Color(0xFFE3E9F2),
+        surfaceTint: Colors.transparent,
+      );
+    }
     final text = _textTheme(Typography.material2021(platform: TargetPlatform.android)
         .englishLike
         .merge(b == Brightness.dark
@@ -32,8 +52,13 @@ class FinFreeApp extends StatelessWidget {
       colorScheme: scheme,
       useMaterial3: true,
       textTheme: text,
+      scaffoldBackgroundColor: scheme.surface,
       appBarTheme: AppBarTheme(
         centerTitle: false,
+        backgroundColor: scheme.surface,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: light ? 0.5 : 0,
+        shadowColor: Colors.black26,
         titleTextStyle: text.titleLarge?.copyWith(color: scheme.onSurface),
       ),
       listTileTheme: ListTileThemeData(
@@ -44,17 +69,35 @@ class FinFreeApp extends StatelessWidget {
       ),
       navigationBarTheme: NavigationBarThemeData(
         labelTextStyle: WidgetStatePropertyAll(text.labelMedium),
+        backgroundColor: light ? Colors.white : null,
+        surfaceTintColor: Colors.transparent,
+        elevation: light ? 3 : null,
+        shadowColor: Colors.black12,
+        indicatorColor: light ? scheme.primary.withValues(alpha: 0.14) : null,
+        iconTheme: light
+            ? WidgetStateProperty.resolveWith((s) => IconThemeData(
+                color: s.contains(WidgetState.selected)
+                    ? scheme.primary
+                    : scheme.onSurfaceVariant))
+            : null,
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: scheme.primary,
+        foregroundColor: scheme.onPrimary,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
+        fillColor: light ? const Color(0xFFEEF2F8) : null,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
       ),
       cardTheme: CardThemeData(
-        elevation: 0,
-        color: scheme.surfaceContainerLow,
+        elevation: light ? 1.5 : 0,
+        shadowColor: Colors.black.withValues(alpha: 0.10),
+        surfaceTintColor: Colors.transparent,
+        color: light ? Colors.white : scheme.surfaceContainerLow,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
     );

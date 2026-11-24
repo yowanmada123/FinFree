@@ -13,7 +13,10 @@ import 'models.dart';
 import 'storage.dart';
 
 const _uuid = Uuid();
-const kDefaultThemeColor = 0xFF0F766E;
+const kDefaultThemeColor = 0xFF0A6CD6; // biru cerah
+
+/// Warna bawaan versi lama (hijau toska kusam) → diganti ke yang cerah.
+const _kOldDefaultThemeColor = 0xFF0F766E;
 String newId() => _uuid.v4();
 
 /// Penyimpanan lokal (offline) seluruh data aplikasi.
@@ -145,7 +148,8 @@ class AppStore extends ChangeNotifier {
     lastBackupAt = s['lastBackupAt'] != null
         ? DateTime.tryParse(s['lastBackupAt'])
         : null;
-    themeColor.value = s['themeColor'] ?? kDefaultThemeColor;
+    final c = s['themeColor'] as int? ?? kDefaultThemeColor;
+    themeColor.value = c == _kOldDefaultThemeColor ? kDefaultThemeColor : c;
     themeMode.value = s['themeMode'] ?? 'system';
   }
 

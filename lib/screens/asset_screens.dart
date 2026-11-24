@@ -98,19 +98,23 @@ class GradientCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // gradasi ke arah lebih terang (bukan lebih gelap) supaya kartu tampak cerah
     final hsl = HSLColor.fromColor(color);
-    final dark = hsl.withLightness((hsl.lightness - 0.15).clamp(0, 1)).toColor();
+    final bright = hsl
+        .withLightness((hsl.lightness + 0.10).clamp(0, 0.62))
+        .withSaturation((hsl.saturation + 0.08).clamp(0, 1))
+        .toColor();
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
-          colors: [color, dark],
+          colors: [bright, color],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.35),
+            color: color.withValues(alpha: 0.28),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -1185,7 +1189,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
             contentPadding: EdgeInsets.zero,
             secondary: const Icon(Icons.phone_iphone_rounded),
             title: const Text('Barang iPhone'),
-            subtitle: const Text('Isi tipe, storage, iBox/Inter, BH & minus'),
+            subtitle: const Text('Isi tipe, storage, garansi/asal, BH & minus'),
             value: _isPhone,
             onChanged: (v) => setState(() => _isPhone = v),
           ),

@@ -274,18 +274,18 @@ class SettingsScreen extends StatelessWidget {
 /// Pilihan warna tema (warna dasar; Material 3 menurunkan palet lengkap
 /// yang serasi & kontrasnya terjaga, termasuk untuk mode gelap).
 const kThemePresets = <(String, int)>[
-  ('Hijau Toska', 0xFF0F766E),
-  ('Hijau Daun', 0xFF2E7D32),
-  ('Biru Laut', 0xFF1565C0),
-  ('Biru Langit', 0xFF0288D1),
-  ('Indigo', 0xFF3949AB),
-  ('Ungu', 0xFF6A1B9A),
-  ('Merah Muda', 0xFFC2185B),
-  ('Merah Bata', 0xFFB23A2E),
-  ('Oranye', 0xFFE65100),
-  ('Kuning Emas', 0xFFB8860B),
-  ('Cokelat Kopi', 0xFF6D4C41),
-  ('Abu Grafit', 0xFF455A64),
+  ('Biru Cerah', 0xFF0A6CD6),
+  ('Biru Bank', 0xFF0057B8),
+  ('Biru Langit', 0xFF0091EA),
+  ('Biru Navy', 0xFF0B3D91),
+  ('Toska', 0xFF00A19B),
+  ('Hijau Segar', 0xFF00A651),
+  ('Oranye', 0xFFF26522),
+  ('Merah', 0xFFE53935),
+  ('Merah Muda', 0xFFE91E63),
+  ('Ungu', 0xFF8E24AA),
+  ('Indigo', 0xFF3F51B5),
+  ('Grafit', 0xFF37474F),
 ];
 
 String themeName(int c) =>

@@ -79,7 +79,7 @@ class _DebtListState extends State<_DebtList> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
           children: [
             GradientCard(
-              color: widget.receivable ? cs.primary : const Color(0xFFB23A2E),
+              color: widget.receivable ? cs.primary : const Color(0xFFE53935),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

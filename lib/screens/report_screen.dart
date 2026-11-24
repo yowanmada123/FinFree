@@ -114,7 +114,7 @@ class _ReportScreenState extends State<ReportScreen> {
             PeriodBar(
               period: _period,
               onChanged: (p) => setState(() => _period = p),
-              onTapLabel: _pickRange,
+              onCustomRange: _pickRange,
             ),
           if (!_custom && s.cycleStartDay != 1)
             Text(

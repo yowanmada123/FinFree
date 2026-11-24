@@ -192,7 +192,7 @@ class ItemCost {
 class PhoneSpec {
   String model; // mis. "iPhone 13 Pro"
   String storage; // mis. "256GB"
-  String region; // 'iBox' / 'Inter' / ''
+  String region; // 'iBox' / 'WiFi Only' / 'Beacukai' / 'All Op' / ''
   int bh; // battery health %, 0 = belum diisi
   List<String> minus; // daftar minus: Dent, Lecet, Face ID mati, …
   String note; // keterangan minus tambahan
@@ -250,7 +250,8 @@ class PhoneSpec {
   factory PhoneSpec.fromJson(Map<String, dynamic> j) => PhoneSpec(
         model: j['model'] ?? '',
         storage: j['storage'] ?? '',
-        region: j['region'] ?? '',
+        // 'Inter' (versi lama) sekarang bernama 'WiFi Only'
+        region: j['region'] == 'Inter' ? 'WiFi Only' : (j['region'] ?? ''),
         bh: ((j['bh'] ?? 0) as num).toInt(),
         minus: ((j['minus'] ?? []) as List).cast<String>().toList(),
         note: j['note'] ?? '',

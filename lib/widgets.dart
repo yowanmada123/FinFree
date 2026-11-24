@@ -148,44 +148,200 @@ class SummaryChip extends StatelessWidget {
 class PeriodBar extends StatelessWidget {
   final Period period;
   final ValueChanged<Period> onChanged;
-  final VoidCallback? onTapLabel;
+
+  /// Opsi tambahan "Rentang tanggal" di pemilih bulan (mis. di Laporan).
+  final VoidCallback? onCustomRange;
   const PeriodBar({
     super.key,
     required this.period,
     required this.onChanged,
-    this.onTapLabel,
+    this.onCustomRange,
   });
 
   @override
   Widget build(BuildContext context) {
     final d = AppStore.I.cycleStartDay;
+    final cs = Theme.of(context).colorScheme;
     return Row(
       children: [
         IconButton(
+          tooltip: 'Bulan sebelumnya',
           icon: const Icon(Icons.chevron_left_rounded),
           onPressed: () => onChanged(period.shift(-1, d)),
         ),
         Expanded(
           child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: onTapLabel,
+            key: const ValueKey('period-label'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: () async {
+              final p = await showMonthPicker(context, period,
+                  onCustomRange: onCustomRange);
+              if (p != null) onChanged(p);
+            },
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                period.label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      period.label,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(Icons.arrow_drop_down_rounded, color: cs.primary),
+                ],
               ),
             ),
           ),
         ),
         IconButton(
+          tooltip: 'Bulan berikutnya',
           icon: const Icon(Icons.chevron_right_rounded),
           onPressed: () => onChanged(period.shift(1, d)),
         ),
       ],
     );
   }
+}
+
+const _kMonthShort = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+  'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+];
+
+/// Pemilih bulan & tahun: tinggal ketuk bulan yang diinginkan.
+/// Bulan yang punya transaksi diberi titik kecil.
+Future<Period?> showMonthPicker(BuildContext context, Period current,
+    {VoidCallback? onCustomRange}) {
+  final d = AppStore.I.cycleStartDay.clamp(1, 28);
+  Period of(int y, int m) => Period(DateTime(y, m, d), DateTime(y, m + 1, d));
+  final now = AppStore.I.currentPeriod.start;
+  final hasData = <int>{};
+  for (final t in AppStore.I.txns) {
+    final p = Period.cycle(t.date, d);
+    hasData.add(p.start.year * 12 + p.start.month);
+  }
+  var year = current.start.year;
+  return showModalBottomSheet<Period>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) {
+        final cs = Theme.of(ctx).colorScheme;
+        Widget month(int m) {
+          final sel = current.start.year == year &&
+              current.start.month == m &&
+              current.start.day == d;
+          final isNow = now.year == year && now.month == m;
+          final data = hasData.contains(year * 12 + m);
+          return Material(
+            color: sel ? cs.primary : cs.surfaceContainer,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => Navigator.pop(ctx, of(year, m)),
+              child: Container(
+                decoration: isNow && !sel
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: cs.primary, width: 1.5))
+                    : null,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(_kMonthShort[m - 1],
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: sel
+                                ? cs.onPrimary
+                                : (isNow ? cs.primary : null))),
+                    const SizedBox(height: 3),
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: data
+                            ? (sel ? cs.onPrimary : cs.primary)
+                            : Colors.transparent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                IconButton.filledTonal(
+                  tooltip: 'Tahun sebelumnya',
+                  onPressed: () => setState(() => year--),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                Expanded(
+                  child: Text('$year',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(ctx)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                ),
+                IconButton.filledTonal(
+                  tooltip: 'Tahun berikutnya',
+                  onPressed: () => setState(() => year++),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ]),
+              const SizedBox(height: 12),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 4,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1.6,
+                children: [for (var m = 1; m <= 12; m++) month(m)],
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
+                        Navigator.pop(ctx, AppStore.I.currentPeriod),
+                    icon: const Icon(Icons.today_rounded),
+                    label: const Text('Bulan ini'),
+                  ),
+                ),
+                if (onCustomRange != null) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        onCustomRange();
+                      },
+                      icon: const Icon(Icons.date_range_rounded),
+                      label: const Text('Rentang tanggal',
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                ],
+              ]),
+            ]),
+          ),
+        );
+      },
+    ),
+  );
 }
 
 Future<bool> confirm(BuildContext context, String title, String msg,

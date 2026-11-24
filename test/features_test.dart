@@ -257,6 +257,8 @@ void main() {
     final part = await s.sellItem(back, qty: 1, price: 11000000,
         date: DateTime.now());
     expect(part.phone?.bh, 86);
+    // data lama "Inter" otomatis jadi "WiFi Only"
+    expect(PhoneSpec.fromJson({'region': 'Inter'}).region, 'WiFi Only');
     // barang lama tanpa spesifikasi tetap terbaca
     expect(Item.fromJson(Item(id: 'x', walletId: 'w', name: 'Casing',
             buyPrice: 1, buyDate: DateTime.now()).toJson()).phone, isNull);

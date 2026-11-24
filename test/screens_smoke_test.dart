@@ -184,7 +184,7 @@ void main() {
     await t.tap(find.text('Ungu'));
     await t.tap(find.text('Gelap'));
     await t.pumpAndSettle();
-    expect(s.themeColor.value, 0xFF6A1B9A);
+    expect(s.themeColor.value, 0xFF8E24AA);
     expect(s.themeMode.value, 'dark');
     final ctx = t.element(find.byType(SettingsScreen));
     expect(Theme.of(ctx).brightness, Brightness.dark);
@@ -194,7 +194,7 @@ void main() {
     s.themeColor.value = 0;
     s.themeMode.value = 'system';
     await s.load();
-    expect(s.themeColor.value, 0xFF6A1B9A);
+    expect(s.themeColor.value, 0xFF8E24AA);
     expect(s.themeMode.value, 'dark');
 
     // layar utama aman di mode gelap
@@ -292,7 +292,7 @@ void main() {
             name: 'Casing bekas iPhone 14 Pro Max', buyPrice: 150000,
             buyDate: DateTime.now(),
             phone: PhoneSpec(model: 'iPhone 14 Pro Max', storage: '1TB',
-                region: 'Inter', bh: 82,
+                region: 'Beacukai', bh: 82,
                 minus: ['Retak kaca belakang', 'Face ID mati', 'Dent'],
                 note: 'dent halus di frame kiri bawah dekat speaker')));
     await t.pumpWidget(MaterialApp(
@@ -329,7 +329,7 @@ void main() {
         theme: FinFreeApp.theme(Brightness.light),
         home: AssetWalletScreen(walletId: asset.id)));
     await t.pumpAndSettle();
-    expect(find.text('Inter'), findsWidgets);
+    expect(find.text('Beacukai'), findsWidgets);
     expect(t.takeException(), isNull);
 
     // form barang iPhone: pilih tipe, storage, iBox, BH, minus → nama otomatis
@@ -429,6 +429,39 @@ void main() {
     await t.tap(find.byKey(const ValueKey('quick-buy')));
     await t.pumpAndSettle();
     expect(find.text('Tambah Barang'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('pilih bulan & tahun langsung dari label periode', (t) async {
+    t.view.physicalSize = const Size(1080, 2400);
+    t.view.devicePixelRatio = 2.75;
+    final year = DateTime.now().year;
+    await t.pumpWidget(_wrap(const ReportScreen()));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('period-label')));
+    await t.pumpAndSettle();
+    expect(find.text('$year'), findsOneWidget);
+    expect(find.text('Rentang tanggal'), findsOneWidget); // khusus Laporan
+    await t.tap(find.byTooltip('Tahun sebelumnya'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Mar'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('Maret ${year - 1}'), findsWidgets);
+    expect(t.takeException(), isNull);
+
+    // di Catatan juga bisa, lalu kembali ke "Bulan ini"
+    await t.pumpWidget(_wrap(const HomeScreen()));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('period-label')));
+    await t.pumpAndSettle();
+    expect(find.text('Rentang tanggal'), findsNothing);
+    await t.tap(find.text('Jan'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('Januari $year'), findsWidgets);
+    await t.tap(find.byKey(const ValueKey('period-label')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Bulan ini'));
+    await t.pumpAndSettle();
     expect(t.takeException(), isNull);
   });
 }
