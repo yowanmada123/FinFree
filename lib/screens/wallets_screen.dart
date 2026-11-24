@@ -134,6 +134,7 @@ class WalletsScreen extends StatelessWidget {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'fab-dompet',
         onPressed: () => _chooseKind(context),
         icon: const Icon(Icons.add_rounded),
         label: const Text('Dompet'),

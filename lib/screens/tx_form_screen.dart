@@ -5,6 +5,7 @@ import '../icons.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
+import 'asset_screens.dart';
 import 'categories_screen.dart';
 
 class TxFormScreen extends StatefulWidget {
@@ -184,6 +185,13 @@ class _TxFormScreenState extends State<TxFormScreen> {
     }
   }
 
+  /// Tutup form Catat lalu langsung buka alur jual/beli barang.
+  void _quick(Future<void> Function(BuildContext) action) {
+    final nav = Navigator.of(context);
+    nav.pop();
+    action(nav.context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = typeColor(_type, context);
@@ -219,6 +227,33 @@ class _TxFormScreenState extends State<TxFormScreen> {
             selected: {_type},
             onSelectionChanged: (v) => _setType(v.first),
           ),
+          // jalan pintas jual/beli barang dagangan tanpa membuka dompet aset
+          if (!_isEdit && s.assetWallets.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  key: const ValueKey('quick-sell'),
+                  style: FilledButton.styleFrom(
+                    foregroundColor: kIncomeColor,
+                    backgroundColor: kIncomeColor.withValues(alpha: 0.12),
+                  ),
+                  onPressed: () => _quick(quickSell),
+                  icon: const Icon(Icons.sell_rounded),
+                  label: const Text('Jual barang'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  key: const ValueKey('quick-buy'),
+                  onPressed: () => _quick(quickBuy),
+                  icon: const Icon(Icons.add_box_rounded),
+                  label: const Text('Beli barang'),
+                ),
+              ),
+            ]),
+          ],
           const SizedBox(height: 16),
           TextField(
             controller: _amount,

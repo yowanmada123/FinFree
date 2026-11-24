@@ -174,6 +174,137 @@ void main() {
     expect(s.walletBalance(asset.id), 0);
   });
 
+  test('jual-beli keluar masuk: uang↔barang dan tukar tambah barang↔barang',
+      () async {
+    final s = await _fresh();
+    final cash = s.cashWallets.first;
+    cash.initialBalance = 10000000;
+    await s.upsertWallet(cash);
+    final asset = Wallet(id: newId(), name: 'iPhone', icon: 'inventory',
+        color: 1, kind: 'asset');
+    await s.upsertWallet(asset);
+
+    // uang keluar → barang masuk
+    final x = Item(id: newId(), walletId: asset.id, name: 'iPhone 13',
+        buyPrice: 6000000, buyDate: DateTime(2026, 5, 1), buyWalletId: cash.id);
+    await s.upsertItem(x);
+    expect(s.walletBalance(cash.id), 4000000);
+    expect(s.walletBalance(asset.id), 6000000);
+
+    // dijual 7jt: dibayar iPhone 11 (nilai 3jt) + uang 4jt
+    final y = Item(id: newId(), walletId: asset.id, name: 'iPhone 11',
+        buyPrice: 3000000, buyDate: DateTime(2026, 5, 3));
+    await s.sellItem(x, qty: 1, price: 7000000, date: DateTime(2026, 5, 3),
+        walletId: cash.id, buyer: 'Rina', tradeIn: y);
+    expect(x.profit, 1000000);
+    expect(x.cashReceived, 4000000);
+    expect(s.walletBalance(cash.id), 8000000); // hanya uang yang masuk
+    expect(s.walletBalance(asset.id), 3000000); // iPhone 11 masuk stok
+    expect(s.item(y.id)?.supplier, 'Rina');
+    expect(s.tradeSource(y)?.id, x.id);
+    final p = s.currentPeriod;
+    final may = s.txnsIn(Period(DateTime(2026, 5, 1), DateTime(2026, 6, 1)));
+    expect(s.sumOf(may, TxType.income), 1000000); // laba saja
+    expect(p, isNotNull);
+
+    // riwayat: 2 masuk, 1 keluar
+    final moves = s.stockMoves(asset.id);
+    expect(moves.where((m) => m.inbound).length, 2);
+    expect(moves.where((m) => !m.inbound).single.cash, 4000000);
+
+    // koreksi nilai tukar → uang tetap, harga jual menyesuaikan
+    y.buyPrice = 2500000;
+    await s.upsertItem(y);
+    expect(x.sellPrice, 6500000);
+    expect(s.walletBalance(cash.id), 8000000);
+
+    // tukar dengan barang lebih mahal: saya yang menambah uang
+    final z = Item(id: newId(), walletId: asset.id, name: 'iPhone 15',
+        buyPrice: 9000000, buyDate: DateTime(2026, 5, 5));
+    await s.sellItem(y, qty: 1, price: 3000000, date: DateTime(2026, 5, 5),
+        walletId: cash.id, tradeIn: z);
+    expect(y.cashReceived, -6000000);
+    expect(s.walletBalance(cash.id), 2000000);
+    expect(s.walletBalance(asset.id), 9000000);
+
+    // batal jual x ditolak karena iPhone 11 hasil tukarnya sudah dijual
+    expect(await s.cancelSale(x), isFalse);
+    expect(await s.cancelSale(y), isTrue); // iPhone 15 keluar lagi
+    expect(s.item(z.id), isNull);
+    expect(s.walletBalance(cash.id), 8000000);
+    expect(await s.cancelSale(x), isTrue);
+    expect(s.item(y.id), isNull);
+    expect(s.walletBalance(cash.id), 4000000);
+    expect(s.walletBalance(asset.id), 6000000);
+  });
+
+  test('spesifikasi iPhone tersimpan & ikut terbawa saat jual sebagian', () async {
+    final s = await _fresh();
+    final asset = Wallet(id: newId(), name: 'iPhone', icon: 'inventory',
+        color: 1, kind: 'asset');
+    await s.upsertWallet(asset);
+    final spec = PhoneSpec(model: 'iPhone 13 Pro', storage: '256GB',
+        region: 'iBox', bh: 86, minus: ['Dent'], note: 'pojok kanan');
+    expect(spec.title, 'iPhone 13 Pro 256GB');
+    expect(spec.summary, 'iBox • BH 86% • Dent • pojok kanan');
+    final it = Item(id: 'p1', walletId: asset.id, name: spec.title, qty: 2,
+        buyPrice: 20000000, buyDate: DateTime.now(), phone: spec);
+    await s.upsertItem(it);
+    await s.load();
+    final back = s.item('p1')!;
+    expect(back.phone?.region, 'iBox');
+    expect(back.phone?.minus, ['Dent']);
+    final part = await s.sellItem(back, qty: 1, price: 11000000,
+        date: DateTime.now());
+    expect(part.phone?.bh, 86);
+    // barang lama tanpa spesifikasi tetap terbaca
+    expect(Item.fromJson(Item(id: 'x', walletId: 'w', name: 'Casing',
+            buyPrice: 1, buyDate: DateTime.now()).toJson()).phone, isNull);
+  });
+
+  test('ringkasan: jual-beli aset, lain-lain, dan total', () async {
+    final s = await _fresh();
+    final cash = s.cashWallets.first;
+    final asset = Wallet(id: newId(), name: 'iPhone', icon: 'inventory',
+        color: 1, kind: 'asset');
+    await s.upsertWallet(asset);
+    final d = DateTime(2026, 5, 10);
+    final p = Period(DateTime(2026, 5, 1), DateTime(2026, 6, 1));
+    final a = Item(id: newId(), walletId: asset.id, name: 'iPhone 13',
+        buyPrice: 6000000, buyDate: d, buyWalletId: cash.id,
+        costs: [ItemCost(id: newId(), name: 'Servis', amount: 200000,
+            date: d, walletId: cash.id)]);
+    await s.upsertItem(a);
+    await s.upsertItem(Item(id: newId(), walletId: asset.id, name: 'Casing',
+        qty: 3, buyPrice: 300000, buyDate: d, buyWalletId: cash.id));
+    await s.sellItem(a, qty: 1, price: 7000000, date: d, walletId: cash.id,
+        tradeIn: Item(id: newId(), walletId: asset.id, name: 'iPhone 11',
+            buyPrice: 2000000, buyDate: d));
+    final cat = s.categoriesOf(TxType.expense).first;
+    await s.upsertTxn(Txn(id: newId(), type: TxType.expense, amount: 500000,
+        categoryId: cat.id, walletId: cash.id, date: d));
+    await s.upsertTxn(Txn(id: newId(), type: TxType.income, amount: 100000,
+        walletId: cash.id, date: d));
+
+    final f = s.flowSummary(p);
+    expect((f.buy, f.buyUnits), (6300000, 4));
+    expect((f.tradeIn, f.tradeInUnits), (2000000, 1));
+    expect(f.costs, 200000);
+    expect((f.sales, f.salesUnits, f.tradePaid), (7000000, 1, 2000000));
+    expect((f.cogs, f.profit), (6200000, 800000));
+    expect(f.turnover, 6300000 + 2000000 + 200000 + 7000000);
+    expect((f.otherIn, f.otherOut), (100000, 500000));
+    expect(f.totalIn, 7100000);
+    expect(f.totalOut, 6300000 + 2000000 + 200000 + 500000);
+    expect(f.netProfit, 400000);
+    // laba bersih = selisih pemasukan − pengeluaran di laporan biasa
+    final list = s.txnsIn(p);
+    expect(s.sumOf(list, TxType.income) - s.sumOf(list, TxType.expense),
+        f.netProfit);
+    expect(s.flowSummary(Period(DateTime(2026, 6, 1), DateTime(2026, 7, 1)))
+        .hasTrade, isFalse);
+  });
+
   test('periode helper tetap benar', () {
     final p = Period.cycle(DateTime(2026, 3, 10), 25);
     expect(p.start, DateTime(2026, 2, 25));

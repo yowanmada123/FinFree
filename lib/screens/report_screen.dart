@@ -153,6 +153,10 @@ class _ReportScreenState extends State<ReportScreen> {
               ),
             ),
           ),
+          if (s.assetWallets.isNotEmpty || s.flowSummary(_period).hasTrade) ...[
+            const SizedBox(height: 16),
+            _flowCard(s.flowSummary(_period)),
+          ],
           const SizedBox(height: 16),
           Text('Pengeluaran harian',
               style: Theme.of(context).textTheme.titleSmall),
@@ -331,6 +335,108 @@ class _ReportScreenState extends State<ReportScreen> {
                           ? TrendMode.income
                           : TrendMode.expense),
                   categoryId: categoryId)));
+
+  /// Ringkasan: jual-beli aset, pemasukan/pengeluaran lain, dan gabungannya.
+  Widget _flowCard(FlowSummary f) {
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    String units(int n) => n > 0 ? ' ($n unit)' : '';
+    Widget head(IconData icon, String t, Color c) => Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 6),
+          child: Row(children: [
+            Icon(icon, size: 18, color: c),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(t,
+                  style: tt.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700, color: c)),
+            ),
+          ]),
+        );
+    Widget line(String a, int v,
+            {Color? color, bool bold = false, bool sign = false, String? sub}) =>
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(a,
+                      style: bold
+                          ? const TextStyle(fontWeight: FontWeight.w700)
+                          : null),
+                  if (sub != null)
+                    Text(sub,
+                        style: tt.bodySmall?.copyWith(color: cs.outline)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(money(v, sign: sign),
+                style: TextStyle(
+                    color: color,
+                    fontWeight: bold ? FontWeight.w800 : FontWeight.w600)),
+          ]),
+        );
+    Color pl(int v) => v >= 0 ? kIncomeColor : kExpenseColor;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            head(Icons.swap_vert_circle_rounded, 'Jual-beli aset', cs.primary),
+            line('Aset masuk (beli)${units(f.buyUnits)}', f.buy,
+                color: kExpenseColor),
+            if (f.tradeIn > 0)
+              line('Aset masuk (tukar tambah)${units(f.tradeInUnits)}',
+                  f.tradeIn,
+                  color: kExpenseColor),
+            line('Biaya barang', f.costs,
+                color: kExpenseColor, sub: 'servis, ongkir, part, dll'),
+            line('Aset keluar (terjual)${units(f.salesUnits)}', f.sales,
+                color: kIncomeColor,
+                sub: f.tradePaid > 0
+                    ? 'termasuk ${money(f.tradePaid)} dibayar barang'
+                    : null),
+            line('Modal barang terjual', f.cogs),
+            line('Total perputaran jual-beli', f.turnover,
+                sub: 'beli + biaya + jual'),
+            line(f.profit >= 0 ? 'Laba jual-beli' : 'Rugi jual-beli',
+                f.profit.abs(),
+                color: pl(f.profit), bold: true),
+            const Divider(height: 20),
+            head(Icons.receipt_long_rounded, 'Di luar jual-beli',
+                cs.tertiary),
+            line('Pemasukan lain', f.otherIn, color: kIncomeColor),
+            line('Pengeluaran lain', f.otherOut, color: kExpenseColor),
+            line('Selisih', f.otherIn - f.otherOut,
+                color: pl(f.otherIn - f.otherOut), sign: true, bold: true),
+            const Divider(height: 20),
+            head(Icons.functions_rounded, 'Total semuanya', cs.onSurface),
+            line('Total masuk', f.totalIn,
+                color: kIncomeColor, sub: 'penjualan + pemasukan lain'),
+            line('Total keluar', f.totalOut,
+                color: kExpenseColor,
+                sub: 'beli aset + biaya + pengeluaran lain'),
+            line('Total perputaran', f.totalIn + f.totalOut,
+                sub: 'masuk + keluar'),
+            line('Arus bersih', f.totalIn - f.totalOut,
+                color: pl(f.totalIn - f.totalOut),
+                sign: true,
+                sub: 'negatif = uang jadi stok'),
+            line(f.netProfit >= 0 ? 'Laba bersih' : 'Rugi bersih',
+                f.netProfit.abs(),
+                color: pl(f.netProfit),
+                bold: true,
+                sub: 'laba jual-beli + pemasukan lain − pengeluaran lain'),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _row(String a, String b, {bool bold = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),

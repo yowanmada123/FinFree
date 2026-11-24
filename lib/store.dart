@@ -439,12 +439,26 @@ class AppStore extends ChangeNotifier {
     }
     if (it.sold && _isCash(it.sellWalletId)) {
       final date = it.sellDate ?? DateTime.now();
-      // modal kembali ke kas
-      txns.add(Txn(
-        id: newId(), itemId: it.id, type: TxType.transfer,
-        amount: it.totalCost, walletId: it.walletId, toWalletId: it.sellWalletId,
-        date: date, note: 'Modal kembali • $label',
-      ));
+      // modal kembali ke kas. Bila tukar tambah, sebagian "pembayaran" berupa
+      // barang (masuk ke stok), jadi uang kas yang kembali berkurang sebesar
+      // nilai barang itu — bisa juga negatif (saya yang menambah uang).
+      final back = it.totalCost - it.tradeInValue;
+      if (back > 0) {
+        txns.add(Txn(
+          id: newId(), itemId: it.id, type: TxType.transfer,
+          amount: back, walletId: it.walletId, toWalletId: it.sellWalletId,
+          date: date,
+          note: it.tradeInValue > 0
+              ? 'Modal kembali (tukar tambah) • $label'
+              : 'Modal kembali • $label',
+        ));
+      } else if (back < 0) {
+        txns.add(Txn(
+          id: newId(), itemId: it.id, type: TxType.transfer,
+          amount: -back, walletId: it.sellWalletId!, toWalletId: it.walletId,
+          date: date, note: 'Tambah uang tukar tambah • $label',
+        ));
+      }
       // selisih = laba (pemasukan) atau rugi (pengeluaran)
       if (it.profit > 0) {
         final c = _ensureCategory('Laba Penjualan', TxType.income, 'business', 0xFF2E7D32);
@@ -467,8 +481,61 @@ class AppStore extends ChangeNotifier {
   Future<void> upsertItem(Item it) async {
     final i = items.indexWhere((e) => e.id == it.id);
     i >= 0 ? items[i] = it : items.add(it);
+    // barang hasil tukar tambah: modalnya = nilai tukar, tidak memotong kas.
+    // Bila nilainya dikoreksi, uang yang diterima tetap → harga jual barang
+    // asal ikut menyesuaikan.
+    final from = tradeSource(it);
+    if (from != null) {
+      it.buyWalletId = null;
+      // (tidak berlaku bila barang tukar ini sudah dipecah karena jual sebagian)
+      final split = items.where((x) => x.tradeFromId == from.id).length > 1;
+      if (!split && from.tradeInValue != it.buyPrice) {
+        from.sellPrice += it.buyPrice - from.tradeInValue;
+        from.tradeInValue = it.buyPrice;
+        _syncItemTxns(from);
+      }
+    }
     _syncItemTxns(it);
     await _commit();
+  }
+
+  /// Barang yang dijual dengan cara ditukar dengan [it] (bila [it] masuk
+  /// dari tukar tambah).
+  Item? tradeSource(Item it) {
+    final f = item(it.tradeFromId);
+    return f != null && f.sold && f.tradeInId == it.id ? f : null;
+  }
+
+  /// Barang yang diterima saat [it] dijual (tukar tambah).
+  Item? tradeIn(Item it) {
+    final t = item(it.tradeInId);
+    return t != null && t.tradeFromId == it.id ? t : null;
+  }
+
+  /// Batalkan penjualan: barang kembali ke stok. Barang tukar tambah yang
+  /// diterima ikut dihapus. Gagal (false) bila barang tukar itu sudah dijual.
+  Future<bool> cancelSale(Item it) async {
+    final got = it.tradeInId == null
+        ? <Item>[]
+        : items.where((i) => i.tradeFromId == it.id).toList();
+    if (got.any((t) => t.sold)) return false;
+    for (final t in got) {
+      items.removeWhere((i) => i.id == t.id);
+      txns.removeWhere((x) => x.itemId == t.id);
+    }
+    for (final ph in got.expand((t) => t.photos).toSet()) {
+      await deletePhotoIfUnused(ph);
+    }
+    it
+      ..sold = false
+      ..sellPrice = 0
+      ..sellDate = null
+      ..sellWalletId = null
+      ..buyer = ''
+      ..tradeInId = null
+      ..tradeInValue = 0;
+    await upsertItem(it);
+    return true;
   }
 
   /// Jual [qty] unit dari barang. Bila sebagian, barang dipecah: bagian yang
@@ -479,7 +546,8 @@ class AppStore extends ChangeNotifier {
       required int price,
       required DateTime date,
       String? walletId,
-      String buyer = ''}) async {
+      String buyer = '',
+      Item? tradeIn}) async {
     if (qty >= it.qty) {
       it
         ..sold = true
@@ -487,6 +555,7 @@ class AppStore extends ChangeNotifier {
         ..sellDate = date
         ..sellWalletId = walletId
         ..buyer = buyer;
+      _attachTradeIn(it, tradeIn);
       await upsertItem(it);
       return it;
     }
@@ -517,6 +586,8 @@ class AppStore extends ChangeNotifier {
       sellWalletId: walletId,
       buyer: buyer,
       photos: List.of(it.photos),
+      tradeFromId: it.tradeFromId,
+      phone: it.phone?.copy(),
     );
     it.buyPrice -= part.buyPrice;
     for (var i = 0; i < it.costs.length; i++) {
@@ -525,14 +596,35 @@ class AppStore extends ChangeNotifier {
     it.targetPrice -= part.targetPrice;
     it.qty -= qty;
     items.add(part);
+    _attachTradeIn(part, tradeIn);
     _syncItemTxns(it);
     _syncItemTxns(part);
     await _commit();
     return part;
   }
 
+  /// Barang yang diterima saat tukar tambah masuk ke stok (modal = nilai
+  /// tukarnya, tanpa memotong kas — "dibayar" dengan barang yang dijual).
+  void _attachTradeIn(Item sold, Item? t) {
+    if (t == null || t.buyPrice <= 0) return;
+    t
+      ..buyDate = sold.sellDate ?? DateTime.now()
+      ..buyWalletId = null
+      ..supplier = t.supplier.isEmpty ? sold.buyer : t.supplier
+      ..tradeFromId = sold.id;
+    sold
+      ..tradeInId = t.id
+      ..tradeInValue = t.buyPrice;
+    items.add(t);
+    _syncItemTxns(t);
+  }
+
   Future<void> deleteItem(String id) async {
     final it = item(id);
+    // barang tukar yang pernah diterima tetap di stok (sudah jadi milik saya)
+    for (final x in items.where((x) => x.tradeFromId == id)) {
+      x.tradeFromId = null;
+    }
     items.removeWhere((i) => i.id == id);
     txns.removeWhere((t) => t.itemId == id);
     for (final ph in it?.photos ?? const <String>[]) {
@@ -549,6 +641,84 @@ class AppStore extends ChangeNotifier {
       final f = File('${(await photoDir()).path}/$name');
       if (f.existsSync()) f.deleteSync();
     } catch (_) {}
+  }
+
+  /// Riwayat keluar-masuk barang di dompet aset, terbaru dulu.
+  /// Barang hasil pecahan jual sebagian digabung kembali jadi satu baris masuk.
+  List<StockMove> stockMoves(String walletId) {
+    final list = itemsOf(walletId);
+    final ins = <String, StockMove>{};
+    for (final i in list) {
+      final key = '${i.name}|${i.buyDate.toIso8601String()}|${i.supplier}|'
+          '${i.tradeFromId ?? ''}';
+      final from = item(i.tradeFromId);
+      final m = ins[key];
+      if (m == null) {
+        ins[key] = StockMove(
+          inbound: true, date: i.buyDate, itemId: i.id, name: i.name,
+          qty: i.qty, value: i.buyPrice, party: i.supplier,
+          walletId: i.buyWalletId,
+          via: from != null ? 'Tukar tambah dari ${from.name}' : null,
+        );
+      } else {
+        ins[key] = m.add(i.qty, i.buyPrice);
+      }
+    }
+    final outs = list.where((i) => i.sold).map((i) {
+      final t = tradeIn(i);
+      return StockMove(
+        inbound: false, date: i.sellDate ?? i.buyDate, itemId: i.id,
+        name: i.name, qty: i.qty, value: i.sellPrice, party: i.buyer,
+        profit: i.profit, walletId: i.sellWalletId,
+        cash: i.cashReceived,
+        via: t != null ? 'Ditukar dengan ${t.name}' : null,
+      );
+    });
+    return [...ins.values, ...outs]
+      ..sort((a, b) {
+        final c = b.date.compareTo(a.date);
+        // di hari yang sama, keluar ditampilkan setelah masuk-nya (tukar tambah)
+        return c != 0 ? c : (a.inbound ? -1 : 1);
+      });
+  }
+
+  /// Ringkasan jual-beli aset + pemasukan/pengeluaran lain pada periode.
+  FlowSummary flowSummary(Period p) {
+    var buy = 0, buyUnits = 0, tradeIn = 0, tradeInUnits = 0, costs = 0;
+    var sales = 0, salesUnits = 0, cogs = 0, profit = 0, tradeOut = 0;
+    for (final i in items) {
+      if (p.contains(i.buyDate)) {
+        if (i.tradeFromId != null) {
+          tradeIn += i.buyPrice;
+          tradeInUnits += i.qty;
+        } else {
+          buy += i.buyPrice;
+          buyUnits += i.qty;
+        }
+      }
+      for (final c in i.costs) {
+        if (p.contains(c.date)) costs += c.amount;
+      }
+      if (i.sold && i.sellDate != null && p.contains(i.sellDate!)) {
+        sales += i.sellPrice;
+        salesUnits += i.qty;
+        cogs += i.totalCost;
+        profit += i.profit;
+        tradeOut += i.tradeInValue;
+      }
+    }
+    var otherIn = 0, otherOut = 0;
+    for (final t in txns) {
+      if (t.itemId != null || t.debtId != null || !p.contains(t.date)) continue;
+      if (t.type == TxType.income) otherIn += t.amount;
+      if (t.type == TxType.expense) otherOut += t.amount;
+    }
+    return FlowSummary(
+      buy: buy, buyUnits: buyUnits, tradeIn: tradeIn,
+      tradeInUnits: tradeInUnits, costs: costs, sales: sales,
+      salesUnits: salesUnits, tradePaid: tradeOut, cogs: cogs, profit: profit,
+      otherIn: otherIn, otherOut: otherOut,
+    );
   }
 
   /// Ringkasan dompet aset.
@@ -884,4 +1054,84 @@ class AppStore extends ChangeNotifier {
         'pinSalt': _pinSalt,
         'biometric': biometricEnabled,
       }));
+}
+
+/// Satu baris riwayat keluar-masuk barang.
+class StockMove {
+  final bool inbound; // true = barang masuk (beli / terima tukar)
+  final DateTime date;
+  final String itemId;
+  final String name;
+  final int qty;
+  final int value; // masuk: modal beli; keluar: harga jual
+  final String party; // pemasok / pembeli
+  final String? via; // keterangan tukar tambah
+  final int profit;
+  final String? walletId; // dompet uang: sumber modal / tujuan hasil jual
+  final int? cash; // keluar: uang yang benar-benar diterima
+  const StockMove({
+    required this.inbound,
+    required this.date,
+    required this.itemId,
+    required this.name,
+    required this.qty,
+    required this.value,
+    this.party = '',
+    this.via,
+    this.profit = 0,
+    this.walletId,
+    this.cash,
+  });
+
+  StockMove add(int q, int v) => StockMove(
+      inbound: inbound, date: date, itemId: itemId, name: name,
+      qty: qty + q, value: value + v, party: party, via: via, profit: profit,
+      walletId: walletId, cash: cash);
+}
+
+/// Ringkasan arus jual-beli aset & pemasukan/pengeluaran lain.
+class FlowSummary {
+  final int buy; // nilai pembelian barang (dibayar uang)
+  final int buyUnits;
+  final int tradeIn; // nilai barang masuk dari tukar tambah
+  final int tradeInUnits;
+  final int costs; // biaya barang: servis, ongkir, dll
+  final int sales; // omzet penjualan (termasuk nilai barang tukar)
+  final int salesUnits;
+  final int tradePaid; // bagian omzet yang dibayar dengan barang
+  final int cogs; // modal barang yang terjual
+  final int profit; // laba/rugi kotor jual-beli
+  final int otherIn; // pemasukan di luar jual-beli
+  final int otherOut; // pengeluaran di luar jual-beli
+  const FlowSummary({
+    required this.buy,
+    required this.buyUnits,
+    required this.tradeIn,
+    required this.tradeInUnits,
+    required this.costs,
+    required this.sales,
+    required this.salesUnits,
+    required this.tradePaid,
+    required this.cogs,
+    required this.profit,
+    required this.otherIn,
+    required this.otherOut,
+  });
+
+  bool get hasTrade =>
+      buy + tradeIn + costs + sales > 0 || buyUnits + salesUnits > 0;
+
+  /// Aset masuk (beli + tukar) & aset keluar (terjual, nilai jual).
+  int get assetIn => buy + tradeIn;
+  int get assetInUnits => buyUnits + tradeInUnits;
+
+  /// Total perputaran jual-beli = semua pembelian + biaya + penjualan.
+  int get turnover => buy + tradeIn + costs + sales;
+
+  /// Total masuk/keluar gabungan (jual-beli + lain-lain).
+  int get totalIn => sales + otherIn;
+  int get totalOut => buy + tradeIn + costs + otherOut;
+
+  /// Laba bersih = laba jual-beli + pemasukan lain − pengeluaran lain.
+  int get netProfit => profit + otherIn - otherOut;
 }

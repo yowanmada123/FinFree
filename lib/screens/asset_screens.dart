@@ -8,6 +8,7 @@ import '../icons.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
+import 'phone_spec.dart';
 import 'wallets_screen.dart';
 
 // ============================================================================
@@ -289,7 +290,7 @@ class AssetWalletScreen extends StatefulWidget {
 }
 
 class _AssetWalletScreenState extends State<AssetWalletScreen> {
-  int _filter = 0; // 0 stok, 1 terjual, 2 semua
+  int _filter = 0; // 0 stok, 1 terjual, 2 semua, 3 riwayat keluar-masuk
   String _q = '';
 
   @override
@@ -313,6 +314,7 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
               .where((i) =>
                   i.name.toLowerCase().contains(q) ||
                   i.detail.toLowerCase().contains(q) ||
+                  (i.phone?.searchText.contains(q) ?? false) ||
                   i.buyer.toLowerCase().contains(q) ||
                   i.supplier.toLowerCase().contains(q))
               .toList();
@@ -382,7 +384,7 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
               TextField(
                 onChanged: (v) => setState(() => _q = v.trim()),
                 decoration: const InputDecoration(
-                  hintText: 'Cari barang, IMEI, pembeli…',
+                  hintText: 'Cari barang, IMEI, iBox, minus…',
                   prefixIcon: Icon(Icons.search_rounded),
                   isDense: true,
                 ),
@@ -394,6 +396,7 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
                   ('Stok (${sum.stockCount})', 0),
                   ('Terjual (${sum.soldCount})', 1),
                   ('Semua', 2),
+                  ('Keluar-masuk', 3),
                 ]
                     .map((e) => ChoiceChip(
                           label: Text(e.$1),
@@ -403,14 +406,16 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
                     .toList(),
               ),
               const SizedBox(height: 8),
-              if (list.isEmpty)
+              if (_filter == 3)
+                ..._moves(context, s.stockMoves(w.id))
+              else if (list.isEmpty)
                 EmptyState(
                   icon: Icons.inventory_2_outlined,
                   text: _filter == 1
                       ? 'Belum ada barang terjual'
                       : 'Belum ada barang.\nTekan "Tambah barang" untuk mencatat dagangan pertama Anda.',
                 ),
-              ...list.map((i) => _ItemCard(item: i)),
+              if (_filter != 3) ...list.map((i) => _ItemCard(item: i)),
             ],
           ),
           floatingActionButton: FloatingActionButton.extended(
@@ -426,6 +431,88 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
       },
     );
   }
+}
+
+/// Riwayat: uang keluar → barang masuk (beli), barang keluar → uang masuk (jual).
+List<Widget> _moves(BuildContext context, List<StockMove> moves) {
+  final s = AppStore.I;
+  final cs = Theme.of(context).colorScheme;
+  if (moves.isEmpty) {
+    return const [
+      EmptyState(
+          icon: Icons.swap_vert_rounded, text: 'Belum ada barang keluar-masuk')
+    ];
+  }
+  String? lastDay;
+  final out = <Widget>[];
+  for (final m in moves) {
+    final day = dfDay.format(m.date);
+    if (day != lastDay) {
+      lastDay = day;
+      out.add(Padding(
+        padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+        child: Text(day,
+            style: Theme.of(context)
+                .textTheme
+                .labelMedium
+                ?.copyWith(color: cs.outline)),
+      ));
+    }
+    final wn = s.wallet(m.walletId)?.name;
+    final flow = m.inbound
+        ? (m.via ?? (wn != null ? 'Uang keluar dari $wn' : 'Tanpa potong saldo'))
+        : [
+            if (m.via != null) m.via!,
+            if (wn != null)
+              (m.cash ?? 0) < 0 ? 'tambah uang dari $wn' : 'uang masuk ke $wn',
+          ].join(' • ');
+    final party = m.party.isEmpty
+        ? ''
+        : (m.inbound ? ' • dari ${m.party}' : ' • ke ${m.party}');
+    final color = m.inbound ? kExpenseColor : kIncomeColor;
+    out.add(Card(
+      margin: const EdgeInsets.symmetric(vertical: 3),
+      child: ListTile(
+        onTap: () => openItem(context, m.itemId),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: (m.inbound ? cs.primary : kIncomeColor)
+                .withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Icon(
+              m.inbound ? Icons.move_to_inbox_rounded : Icons.outbox_rounded,
+              color: m.inbound ? cs.primary : kIncomeColor),
+        ),
+        title: Text(
+            '${m.inbound ? 'Masuk' : 'Keluar'} • ${m.name}${m.qty > 1 ? ' ×${m.qty}' : ''}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
+        subtitle: Text(
+            '${flow.isEmpty ? (m.inbound ? 'Dibeli' : 'Dijual') : flow}$party',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(money(m.inbound ? -m.value : m.value, sign: !m.inbound),
+                style: TextStyle(fontWeight: FontWeight.w700, color: color)),
+            if (!m.inbound)
+              Text(
+                  m.profit >= 0
+                      ? 'untung ${money(m.profit)}'
+                      : 'rugi ${money(-m.profit)}',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: m.profit >= 0 ? kIncomeColor : kExpenseColor)),
+          ],
+        ),
+      ),
+    ));
+  }
+  return out;
 }
 
 class _ItemCard extends StatelessWidget {
@@ -457,6 +544,11 @@ class _ItemCard extends StatelessWidget {
                         Text(i.qty > 1 ? '${i.name}  ×${i.qty}' : i.name,
                             style: tt.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.w700)),
+                        if (i.phone != null && !i.phone!.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, bottom: 2),
+                            child: PhoneSpecChips(spec: i.phone!, dense: true),
+                          ),
                         if (i.detail.isNotEmpty)
                           Text(i.detail,
                               maxLines: 1,
@@ -583,6 +675,9 @@ class ItemDetailScreen extends StatelessWidget {
                       ..['buyer'] = ''
                       ..['costs'] = []
                       ..['photos'] = []
+                      ..['tradeInId'] = null
+                      ..['tradeInValue'] = 0
+                      ..['tradeFromId'] = null
                       ..['buyDate'] = DateTime.now().toIso8601String());
                     if (!context.mounted) return;
                     await Navigator.push(
@@ -674,6 +769,25 @@ class ItemDetailScreen extends StatelessWidget {
               const SizedBox(height: 12),
               PhotoStrip(item: i),
               const SizedBox(height: 12),
+              if (i.phone != null && !i.phone!.isEmpty) ...[
+                _Section(
+                  title: 'Spesifikasi iPhone',
+                  icon: Icons.phone_iphone_rounded,
+                  children: [
+                    if (i.phone!.model.isNotEmpty)
+                      _info(context, Icons.phone_iphone_rounded, 'Tipe',
+                          i.phone!.title),
+                    const SizedBox(height: 4),
+                    PhoneSpecChips(spec: i.phone!),
+                    if (i.phone!.note.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _info(context, Icons.report_gmailerrorred_rounded,
+                          'Keterangan minus', i.phone!.note),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
 
               // ---- rincian perhitungan ----
               _Section(
@@ -744,9 +858,13 @@ class ItemDetailScreen extends StatelessWidget {
                       dfDay.format(i.buyDate)),
                   _info(context, Icons.storefront_rounded, 'Beli dari',
                       i.supplier.isEmpty ? '-' : i.supplier),
-                  _info(context, Icons.account_balance_wallet_rounded,
-                      'Modal diambil dari',
-                      s.wallet(i.buyWalletId)?.name ?? 'Tidak dari saldo'),
+                  if (s.item(i.tradeFromId) != null)
+                    _tradeLink(context, s.item(i.tradeFromId), 'Didapat dari',
+                        'Tukar tambah ${s.item(i.tradeFromId)!.name}')
+                  else
+                    _info(context, Icons.account_balance_wallet_rounded,
+                        'Modal diambil dari',
+                        s.wallet(i.buyWalletId)?.name ?? 'Tidak dari saldo'),
                   _info(context, Icons.inventory_2_rounded, 'Disimpan di',
                       w?.name ?? '-'),
                 ],
@@ -761,8 +879,21 @@ class ItemDetailScreen extends StatelessWidget {
                         'Tanggal jual', dfDay.format(i.sellDate!)),
                     _info(context, Icons.person_rounded, 'Pembeli',
                         i.buyer.isEmpty ? '-' : i.buyer),
-                    _info(context, Icons.account_balance_wallet_rounded,
-                        'Uang masuk ke',
+                    if (i.tradeInValue > 0) ...[
+                      _tradeLink(context, s.tradeIn(i), 'Ditukar dengan',
+                          '${s.tradeIn(i)?.name ?? 'barang'} (${money(i.tradeInValue)})'),
+                      _info(
+                          context,
+                          Icons.payments_rounded,
+                          i.cashReceived >= 0
+                              ? 'Uang diterima'
+                              : 'Anda menambah uang',
+                          money(i.cashReceived.abs())),
+                    ],
+                    _info(
+                        context,
+                        Icons.account_balance_wallet_rounded,
+                        i.cashReceived < 0 ? 'Uang diambil dari' : 'Uang masuk ke',
                         s.wallet(i.sellWalletId)?.name ?? 'Tidak ke saldo'),
                     _info(context, Icons.timer_rounded, 'Lama terjual',
                         '${i.holdDays} hari sejak dibeli'),
@@ -770,15 +901,15 @@ class ItemDetailScreen extends StatelessWidget {
                     OutlinedButton.icon(
                       onPressed: () async {
                         if (await confirm(context, 'Batalkan penjualan?',
-                            'Barang akan kembali ke stok dan transaksi penjualannya dihapus.',
+                            i.tradeInId != null
+                                ? 'Barang akan kembali ke stok, transaksi penjualannya dihapus, dan barang tukar tambah yang diterima dikeluarkan dari stok.'
+                                : 'Barang akan kembali ke stok dan transaksi penjualannya dihapus.',
                             ok: 'Batalkan')) {
-                          i
-                            ..sold = false
-                            ..sellPrice = 0
-                            ..sellDate = null
-                            ..sellWalletId = null
-                            ..buyer = '';
-                          await s.upsertItem(i);
+                          final ok = await s.cancelSale(i);
+                          if (!ok && context.mounted) {
+                            toast(context,
+                                'Barang tukar tambahnya sudah dijual. Batalkan penjualan barang itu dulu.');
+                          }
                         }
                       },
                       icon: const Icon(Icons.undo_rounded),
@@ -819,6 +950,20 @@ class ItemDetailScreen extends StatelessWidget {
       },
     );
   }
+
+  Widget _tradeLink(
+          BuildContext context, Item? other, String label, String value) =>
+      InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: other == null ? null : () => openItem(context, other.id),
+        child: Row(children: [
+          Expanded(
+              child: _info(context, Icons.swap_horiz_rounded, label, value)),
+          if (other != null)
+            Icon(Icons.chevron_right_rounded,
+                color: Theme.of(context).colorScheme.outline),
+        ]),
+      );
 
   Widget _line(BuildContext context, String a, String b,
           {bool bold = false, String? sub, VoidCallback? onTap}) =>
@@ -932,11 +1077,26 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
   String? _buyWallet;
   String? _sellWallet;
   bool _sold = false;
+  bool _isPhone = false;
+  PhoneSpec _phone = PhoneSpec();
+  bool _autoName = true; // nama mengikuti tipe + storage sampai diubah manual
+
+  void _phoneChanged() => setState(() {
+        if (_autoName && _phone.title.isNotEmpty) _name.text = _phone.title;
+      });
 
   @override
   void initState() {
     super.initState();
     final src = widget.edit ?? widget.template;
+    // dompet berisi iPhone → form langsung mode iPhone
+    final w = AppStore.I.wallet(widget.walletId);
+    _isPhone = src != null
+        ? (src.phone != null || looksLikeIphone(src.name))
+        : (looksLikeIphone(w?.name ?? '') ||
+            AppStore.I.itemsOf(widget.walletId).any((i) => i.phone != null));
+    _phone = src?.phone?.copy() ?? PhoneSpec();
+    _autoName = src == null || src.name == _phone.title;
     _buyWallet = AppStore.I.defaultWallet.isAsset
         ? null
         : AppStore.I.defaultWallet.id;
@@ -966,6 +1126,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_isPhone && _name.text.trim().isEmpty) _name.text = _phone.title;
     final name = _name.text.trim();
     final buy = parseAmount(_buy.text);
     if (name.isEmpty || buy <= 0) {
@@ -995,6 +1156,10 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
       buyer: _sold ? _buyer.text.trim() : '',
       qty: _qty,
       photos: e?.photos ?? [],
+      tradeInId: e?.tradeInId,
+      tradeInValue: e?.tradeInValue ?? 0,
+      tradeFromId: e?.tradeFromId,
+      phone: _isPhone && !_phone.isEmpty ? _phone : null,
     );
     await AppStore.I.upsertItem(it);
     if (mounted) Navigator.pop(context);
@@ -1016,14 +1181,32 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
           _groupLabel(context, '1', 'Info barang'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.phone_iphone_rounded),
+            title: const Text('Barang iPhone'),
+            subtitle: const Text('Isi tipe, storage, iBox/Inter, BH & minus'),
+            value: _isPhone,
+            onChanged: (v) => setState(() => _isPhone = v),
+          ),
+          if (_isPhone) ...[
+            PhoneSpecEditor(spec: _phone, onChanged: _phoneChanged),
+            gap,
+          ],
           TextField(
             controller: _name,
-            autofocus: widget.edit == null && widget.template == null,
+            autofocus:
+                !_isPhone && widget.edit == null && widget.template == null,
             textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
+            onChanged: (v) => _autoName =
+                v.trim().isEmpty || (_isPhone && v.trim() == _phone.title),
+            decoration: InputDecoration(
               labelText: 'Nama barang *',
               hintText: 'mis. iPhone 13 Pro 256GB',
-              prefixIcon: Icon(Icons.inventory_2_rounded),
+              helperText: _isPhone && _autoName
+                  ? 'Terisi otomatis dari tipe & storage'
+                  : null,
+              prefixIcon: const Icon(Icons.inventory_2_rounded),
             ),
           ),
           gap,
@@ -1031,10 +1214,12 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
             controller: _detail,
             maxLines: 2,
             minLines: 1,
-            decoration: const InputDecoration(
-              labelText: 'Detail / spesifikasi',
-              hintText: 'Warna, kondisi, IMEI, kelengkapan…',
-              prefixIcon: Icon(Icons.notes_rounded),
+            decoration: InputDecoration(
+              labelText: _isPhone ? 'Detail lain (opsional)' : 'Detail / spesifikasi',
+              hintText: _isPhone
+                  ? 'Warna, IMEI, kelengkapan (fullset / unit only)…'
+                  : 'Warna, kondisi, IMEI, kelengkapan…',
+              prefixIcon: const Icon(Icons.notes_rounded),
             ),
           ),
           gap,
@@ -1240,6 +1425,15 @@ Future<void> showSellSheet(BuildContext context, Item i) async {
   String? walletId = AppStore.I.defaultWallet.isAsset
       ? null
       : AppStore.I.defaultWallet.id;
+  // tukar tambah: pembeli membayar (sebagian) dengan barang
+  var trade = false;
+  final tName = TextEditingController();
+  final tDetail = TextEditingController();
+  final tValue = TextEditingController();
+  var tWallet = i.walletId;
+  var tIsPhone = i.phone != null || looksLikeIphone(i.name);
+  final tPhone = PhoneSpec();
+  var tAuto = true;
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -1293,11 +1487,86 @@ Future<void> showSellSheet(BuildContext context, Item i) async {
                   autofocus: true, onChanged: (_) => setState(() {})),
               const SizedBox(height: 12),
               DateField('Tanggal jual', date, (d) => setState(() => date = d)),
-              const SizedBox(height: 12),
+              const SizedBox(height: 4),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: trade,
+                onChanged: (v) => setState(() => trade = v),
+                secondary: const Icon(Icons.swap_horiz_rounded),
+                title: const Text('Tukar tambah / barter'),
+                subtitle: const Text(
+                    'Dibayar dengan barang lain (+/− uang). Barangnya masuk ke stok.'),
+              ),
+              if (trade) ...[
+                const SizedBox(height: 4),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Barang yang diterima iPhone'),
+                  value: tIsPhone,
+                  onChanged: (v) => setState(() => tIsPhone = v),
+                ),
+                if (tIsPhone) ...[
+                  PhoneSpecEditor(
+                    spec: tPhone,
+                    onChanged: () => setState(() {
+                      if (tAuto && tPhone.title.isNotEmpty) {
+                        tName.text = tPhone.title;
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                TextField(
+                  controller: tName,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (v) => tAuto = v.trim().isEmpty,
+                  decoration: const InputDecoration(
+                    labelText: 'Barang yang diterima',
+                    hintText: 'mis. iPhone 11 64GB',
+                    prefixIcon: Icon(Icons.move_to_inbox_rounded),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: tDetail,
+                  decoration: const InputDecoration(
+                    labelText: 'Detail (opsional)',
+                    hintText: 'warna, kondisi, IMEI…',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                AmountField(tValue, 'Nilai barang yang diterima',
+                    onChanged: (_) => setState(() {})),
+                if (AppStore.I.assetWallets.length > 1) ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: tWallet,
+                    isExpanded: true,
+                    decoration:
+                        const InputDecoration(labelText: 'Masuk ke dompet aset'),
+                    items: AppStore.I.assetWallets
+                        .map((w) => DropdownMenuItem(
+                            value: w.id,
+                            child: Text(w.name, overflow: TextOverflow.ellipsis)))
+                        .toList(),
+                    onChanged: (v) => setState(() => tWallet = v ?? tWallet),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                TradeCashInfo(
+                    cash: parseAmount(price.text) - parseAmount(tValue.text)),
+                const SizedBox(height: 12),
+              ] else
+                const SizedBox(height: 8),
               CashWalletPicker(
-                label: 'Uang masuk ke dompet',
+                label: !trade
+                    ? 'Uang masuk ke dompet'
+                    : (parseAmount(price.text) - parseAmount(tValue.text) < 0
+                        ? 'Uang tambahan diambil dari'
+                        : 'Sisa uang masuk ke dompet'),
                 value: walletId,
-                noneLabel: 'Tidak masuk saldo',
+                noneLabel: 'Tidak memengaruhi saldo',
                 onChanged: (v) => setState(() => walletId = v),
               ),
               const SizedBox(height: 12),
@@ -1322,12 +1591,29 @@ Future<void> showSellSheet(BuildContext context, Item i) async {
                 onPressed: () async {
                   final p = parseAmount(price.text);
                   if (p <= 0) return;
+                  final tv = parseAmount(tValue.text);
+                  if (trade && (tName.text.trim().isEmpty || tv <= 0)) {
+                    toast(ctx, 'Isi nama & nilai barang yang diterima');
+                    return;
+                  }
                   final sold = await AppStore.I.sellItem(i,
                       qty: n,
                       price: p,
                       date: date,
                       walletId: walletId,
-                      buyer: buyer.text.trim());
+                      buyer: buyer.text.trim(),
+                      tradeIn: trade
+                          ? Item(
+                              id: newId(),
+                              walletId: tWallet,
+                              name: tName.text.trim(),
+                              detail: tDetail.text.trim(),
+                              buyPrice: tv,
+                              buyDate: date,
+                              phone: tIsPhone && !tPhone.isEmpty
+                                  ? tPhone
+                                  : null)
+                          : null);
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (context.mounted) {
                     final left = sold.id == i.id ? '' : ' • sisa stok ${i.qty}';
@@ -1347,6 +1633,39 @@ Future<void> showSellSheet(BuildContext context, Item i) async {
       ),
     ),
   );
+}
+
+/// Ringkasan uang pada tukar tambah: harga jual − nilai barang diterima.
+class TradeCashInfo extends StatelessWidget {
+  final int cash;
+  const TradeCashInfo({super.key, required this.cash});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final (icon, text, color) = cash > 0
+        ? (Icons.south_west_rounded, 'Pembeli menambah uang ${rupiah(cash)}',
+            kIncomeColor)
+        : cash < 0
+            ? (Icons.north_east_rounded,
+                'Anda menambah uang ${rupiah(-cash)}', kExpenseColor)
+            : (Icons.swap_horiz_rounded, 'Tukar impas, tanpa uang',
+                cs.primary);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(children: [
+        Icon(icon, color: color),
+        const SizedBox(width: 10),
+        Expanded(
+            child: Text(text,
+                style: TextStyle(color: color, fontWeight: FontWeight.w700))),
+      ]),
+    );
+  }
 }
 
 const _costPresets = [
@@ -1599,6 +1918,151 @@ class PhotoStrip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ============================================================================
+// Jalan pintas dari "Catat": jual / beli barang tanpa membuka dompet aset
+// ============================================================================
+
+/// Pilih barang stok (dari semua dompet aset) lalu langsung buka lembar jual.
+Future<void> quickSell(BuildContext context) async {
+  final picked = await showModalBottomSheet<Item>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => const _StockPicker(),
+  );
+  if (picked != null && context.mounted) await showSellSheet(context, picked);
+}
+
+/// Pilih dompet aset (bila lebih dari satu) lalu buka form tambah barang.
+Future<void> quickBuy(BuildContext context) async {
+  final wallets = AppStore.I.assetWallets;
+  if (wallets.isEmpty) return;
+  var id = wallets.first.id;
+  if (wallets.length > 1) {
+    final w = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: sheetTitle(c, Icons.add_box_rounded, 'Simpan di dompet aset'),
+          ),
+          ...wallets.map((w) => ListTile(
+                leading: CircleIcon(icon: w.icon, color: w.color),
+                title: Text(w.name),
+                subtitle: Text(
+                    '${AppStore.I.assetSummary(w.id).stockCount} unit di stok'),
+                onTap: () => Navigator.pop(c, w.id),
+              )),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (w == null) return;
+    id = w;
+  }
+  if (!context.mounted) return;
+  await Navigator.push(
+      context,
+      MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => ItemFormScreen(walletId: id)));
+}
+
+class _StockPicker extends StatefulWidget {
+  const _StockPicker();
+
+  @override
+  State<_StockPicker> createState() => _StockPickerState();
+}
+
+class _StockPickerState extends State<_StockPicker> {
+  String _q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppStore.I;
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final q = _q.trim().toLowerCase();
+    final stock = s.items.where((i) => !i.sold).where((i) =>
+        q.isEmpty ||
+        i.name.toLowerCase().contains(q) ||
+        i.detail.toLowerCase().contains(q) ||
+        (i.phone?.searchText.contains(q) ?? false)).toList()
+      ..sort((a, b) => b.buyDate.compareTo(a.buyDate));
+    final multi = s.assetWallets.length > 1;
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.8,
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: sheetTitle(context, Icons.sell_rounded, 'Jual barang'),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: TextField(
+            onChanged: (v) => setState(() => _q = v),
+            decoration: const InputDecoration(
+              hintText: 'Cari tipe, IMEI, iBox, minus…',
+              prefixIcon: Icon(Icons.search_rounded),
+              isDense: true,
+            ),
+          ),
+        ),
+        Expanded(
+          child: stock.isEmpty
+              ? EmptyState(
+                  icon: Icons.inventory_2_outlined,
+                  text: q.isEmpty
+                      ? 'Belum ada barang di stok'
+                      : 'Tidak ada barang yang cocok')
+              : ListView.builder(
+                  padding: EdgeInsets.only(
+                      bottom: 16 + MediaQuery.of(context).viewInsets.bottom),
+                  itemCount: stock.length,
+                  itemBuilder: (_, n) {
+                    final i = stock[n];
+                    final w = s.wallet(i.walletId);
+                    return ListTile(
+                      onTap: () => Navigator.pop(context, i),
+                      leading: CircleIcon(
+                          icon: i.phone != null ? 'smartphone_box' : (w?.icon ?? 'inventory'),
+                          color: w?.color ?? cs.primary.toARGB32()),
+                      title: Text(i.qty > 1 ? '${i.name}  ×${i.qty}' : i.name,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (i.phone != null && !i.phone!.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3, bottom: 2),
+                              child: PhoneSpecChips(spec: i.phone!, dense: true),
+                            ),
+                          Text(
+                              [
+                                'Modal ${money(i.totalCost)}',
+                                if (i.targetPrice > 0)
+                                  'target ${money(i.targetPrice)}',
+                                if (multi && w != null) w.name,
+                              ].join(' • '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.bodySmall),
+                        ],
+                      ),
+                      trailing: Icon(Icons.chevron_right_rounded,
+                          color: cs.outline),
+                    );
+                  },
+                ),
+        ),
+      ]),
     );
   }
 }

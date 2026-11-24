@@ -9,6 +9,7 @@ import 'package:goes_to_financial_freedom/screens/home_screen.dart';
 import 'package:goes_to_financial_freedom/screens/tools_screens.dart';
 import 'package:goes_to_financial_freedom/screens/tx_form_screen.dart';
 import 'package:goes_to_financial_freedom/screens/wallets_screen.dart';
+import 'package:goes_to_financial_freedom/screens/report_screen.dart';
 import 'package:goes_to_financial_freedom/screens/settings_screen.dart';
 import 'package:goes_to_financial_freedom/screens/trend_screen.dart';
 import 'package:goes_to_financial_freedom/store.dart';
@@ -273,6 +274,93 @@ void main() {
     await t.tap(find.text('Jual (stok 12)'));
     await t.pumpAndSettle();
     expect(find.text('12 / 12'), findsOneWidget);
+    // tukar tambah: isian barang yang diterima muncul
+    await t.tap(find.text('Tukar tambah / barter'));
+    await t.pumpAndSettle();
+    expect(find.text('Barang yang diterima'), findsOneWidget);
+    expect(find.textContaining('Pembeli menambah uang'), findsOneWidget);
+    expect(t.takeException(), isNull);
+
+    Navigator.of(t.element(find.text('Barang yang diterima'))).pop();
+    await t.pumpAndSettle();
+
+    // jual dengan tukar tambah → riwayat keluar-masuk
+    final q1 = s.item('q1')!;
+    await s.sellItem(q1, qty: 2, price: 400000, date: DateTime.now(),
+        walletId: cash.id, buyer: 'Pelanggan setia toko',
+        tradeIn: Item(id: 'tz', walletId: asset.id,
+            name: 'Casing bekas iPhone 14 Pro Max', buyPrice: 150000,
+            buyDate: DateTime.now(),
+            phone: PhoneSpec(model: 'iPhone 14 Pro Max', storage: '1TB',
+                region: 'Inter', bh: 82,
+                minus: ['Retak kaca belakang', 'Face ID mati', 'Dent'],
+                note: 'dent halus di frame kiri bawah dekat speaker')));
+    await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: Builder(
+          builder: (c) => MediaQuery(
+            data: MediaQuery.of(c)
+                .copyWith(textScaler: const TextScaler.linear(1.15)),
+            child: AssetWalletScreen(walletId: asset.id),
+          ),
+        )));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Keluar-masuk'));
+    await t.pumpAndSettle();
+    await t.scrollUntilVisible(find.textContaining('Masuk • Casing iPhone'), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.textContaining('Masuk • Casing bekas'), findsOneWidget);
+    expect(find.textContaining('Keluar • Casing iPhone'), findsOneWidget);
+    expect(find.textContaining('Masuk • Casing iPhone 15 Pro Max MagSafe ×12'),
+        findsOneWidget); // pecahan jual sebagian digabung lagi
+    expect(t.takeException(), isNull);
+    await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: const ItemDetailScreen(itemId: 'tz')));
+    await t.pumpAndSettle();
+    expect(find.text('Spesifikasi iPhone'), findsOneWidget);
+    expect(find.text('BH 82%'), findsOneWidget);
+    await t.scrollUntilVisible(find.text('Didapat dari'), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.text('Didapat dari'), findsOneWidget);
+    expect(t.takeException(), isNull);
+    // kartu barang dengan chip spesifikasi
+    await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: AssetWalletScreen(walletId: asset.id)));
+    await t.pumpAndSettle();
+    expect(find.text('Inter'), findsWidgets);
+    expect(t.takeException(), isNull);
+
+    // form barang iPhone: pilih tipe, storage, iBox, BH, minus → nama otomatis
+    await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: Builder(
+          builder: (c) => MediaQuery(
+            data: MediaQuery.of(c)
+                .copyWith(textScaler: const TextScaler.linear(1.15)),
+            child: ItemFormScreen(walletId: asset.id),
+          ),
+        )));
+    await t.pumpAndSettle();
+    expect(find.text('Tipe iPhone'), findsOneWidget); // dompet iPhone → mode iPhone
+    await t.tap(find.text('Pilih tipe…'));
+    await t.pumpAndSettle();
+    await t.enterText(find.byType(TextField).last, '13 pro max');
+    await t.pumpAndSettle();
+    await t.tap(find.text('iPhone 13 Pro Max'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('256GB'));
+    await t.tap(find.text('iBox'));
+    await t.enterText(find.widgetWithText(TextField, 'Battery health (BH)'), '78');
+    await t.pumpAndSettle();
+    expect(find.textContaining('Service'), findsOneWidget);
+    await t.scrollUntilVisible(find.text('Dent'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await t.tap(find.text('Dent'));
+    await t.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'iPhone 13 Pro Max 256GB'),
+        findsOneWidget);
     expect(t.takeException(), isNull);
 
     await t.pumpWidget(MaterialApp(
@@ -284,4 +372,63 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
+  testWidgets('Catat → Jual barang langsung, tanpa membuka dompet aset',
+      (t) async {
+    t.view.physicalSize = const Size(1080, 2400);
+    t.view.devicePixelRatio = 2.75;
+    final s = AppStore.I;
+    final asset = s.assetWallets.first;
+    await s.upsertItem(Item(id: 's1', walletId: asset.id,
+        name: 'iPhone 12 128GB', buyPrice: 5000000, buyDate: DateTime.now(),
+        targetPrice: 6000000,
+        phone: PhoneSpec(model: 'iPhone 12', storage: '128GB',
+            region: 'iBox', bh: 88)));
+    await t.pumpWidget(_wrap(const HomeScreen()));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Catat'));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('quick-sell')));
+    await t.pumpAndSettle();
+    // form Catat tertutup, daftar stok terbuka (barang terjual tidak tampil)
+    expect(find.text('Catat Transaksi'), findsNothing);
+    expect(find.text('iPhone 12 128GB'), findsOneWidget);
+    expect(find.text('iPhone 13'), findsNothing);
+    await t.enterText(find.byType(TextField).first, 'ibox');
+    await t.pumpAndSettle();
+    await t.tap(find.text('iPhone 12 128GB'));
+    await t.pumpAndSettle();
+    expect(find.text('Simpan penjualan'), findsOneWidget);
+    await t.tap(find.text('Simpan penjualan'));
+    await t.pumpAndSettle();
+    expect(s.item('s1')!.sold, isTrue);
+    expect(s.item('s1')!.profit, 1000000);
+    expect(t.takeException(), isNull);
+
+    // ringkasan jual-beli di Laporan
+    await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: Builder(
+          builder: (c) => MediaQuery(
+            data: MediaQuery.of(c)
+                .copyWith(textScaler: const TextScaler.linear(1.15)),
+            child: const ReportScreen(),
+          ),
+        )));
+    await t.pumpAndSettle();
+    await t.scrollUntilVisible(find.text('Laba bersih'), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.text('Jual-beli aset'), findsOneWidget);
+    expect(find.text('Total semuanya'), findsOneWidget);
+    expect(t.takeException(), isNull);
+    await t.pumpWidget(_wrap(const HomeScreen()));
+    await t.pumpAndSettle();
+
+    // Beli barang → langsung ke form tambah barang
+    await t.tap(find.text('Catat'));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('quick-buy')));
+    await t.pumpAndSettle();
+    expect(find.text('Tambah Barang'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
 }

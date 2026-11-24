@@ -188,6 +188,75 @@ class ItemCost {
       );
 }
 
+/// Spesifikasi khusus iPhone (model, storage, garansi resmi/inter, BH, minus).
+class PhoneSpec {
+  String model; // mis. "iPhone 13 Pro"
+  String storage; // mis. "256GB"
+  String region; // 'iBox' / 'Inter' / ''
+  int bh; // battery health %, 0 = belum diisi
+  List<String> minus; // daftar minus: Dent, Lecet, Face ID mati, …
+  String note; // keterangan minus tambahan
+
+  PhoneSpec({
+    this.model = '',
+    this.storage = '',
+    this.region = '',
+    this.bh = 0,
+    List<String>? minus,
+    this.note = '',
+  }) : minus = minus ?? [];
+
+  bool get isEmpty =>
+      model.isEmpty &&
+      storage.isEmpty &&
+      region.isEmpty &&
+      bh == 0 &&
+      minus.isEmpty &&
+      note.isEmpty;
+
+  /// Nama otomatis, mis. "iPhone 13 Pro 256GB".
+  String get title => [model, storage].where((e) => e.isNotEmpty).join(' ');
+
+  /// Ringkasan singkat, mis. "iBox • BH 87% • Dent, Lecet".
+  String get summary => [
+        if (region.isNotEmpty) region,
+        if (bh > 0) 'BH $bh%',
+        if (minus.isEmpty && note.isEmpty) 'No minus',
+        if (minus.isNotEmpty) minus.join(', '),
+        if (note.isNotEmpty) note,
+      ].join(' • ');
+
+  /// Teks untuk pencarian.
+  String get searchText =>
+      '$model $storage $region bh$bh ${minus.join(' ')} $note'.toLowerCase();
+
+  PhoneSpec copy() => PhoneSpec(
+      model: model,
+      storage: storage,
+      region: region,
+      bh: bh,
+      minus: List.of(minus),
+      note: note);
+
+  Map<String, dynamic> toJson() => {
+        'model': model,
+        'storage': storage,
+        'region': region,
+        'bh': bh,
+        'minus': minus,
+        'note': note,
+      };
+
+  factory PhoneSpec.fromJson(Map<String, dynamic> j) => PhoneSpec(
+        model: j['model'] ?? '',
+        storage: j['storage'] ?? '',
+        region: j['region'] ?? '',
+        bh: ((j['bh'] ?? 0) as num).toInt(),
+        minus: ((j['minus'] ?? []) as List).cast<String>().toList(),
+        note: j['note'] ?? '',
+      );
+}
+
 /// Barang dagangan / aset di dalam dompet aset.
 class Item {
   final String id;
@@ -213,6 +282,19 @@ class Item {
   /// Nama file foto barang/nota (disimpan di folder aplikasi).
   List<String> photos;
 
+  /// Tukar tambah: barang lain yang DITERIMA sebagai bagian pembayaran saat
+  /// barang ini dijual. [tradeInValue] ikut dihitung dalam [sellPrice],
+  /// jadi uang yang benar-benar diterima = sellPrice - tradeInValue
+  /// (negatif = saya yang menambah uang).
+  String? tradeInId;
+  int tradeInValue;
+
+  /// Barang ini masuk dari tukar tambah atas barang [tradeFromId].
+  String? tradeFromId;
+
+  /// Spesifikasi iPhone (null = bukan iPhone / tidak diisi).
+  PhoneSpec? phone;
+
   Item({
     required this.id,
     required this.walletId,
@@ -231,6 +313,10 @@ class Item {
     this.buyer = '',
     this.qty = 1,
     List<String>? photos,
+    this.tradeInId,
+    this.tradeInValue = 0,
+    this.tradeFromId,
+    this.phone,
   })  : costs = costs ?? [],
         photos = photos ?? [];
 
@@ -248,6 +334,9 @@ class Item {
 
   double get marginPct =>
       totalCost > 0 ? (sold ? profit : potentialProfit) * 100 / totalCost : 0;
+
+  /// Uang yang benar-benar diterima saat jual (dikurangi nilai barang tukar).
+  int get cashReceived => sellPrice - tradeInValue;
 
   int get holdDays =>
       ((sold ? sellDate : null) ?? DateTime.now()).difference(buyDate).inDays;
@@ -270,6 +359,10 @@ class Item {
         'buyer': buyer,
         'qty': qty,
         'photos': photos,
+        'tradeInId': tradeInId,
+        'tradeInValue': tradeInValue,
+        'tradeFromId': tradeFromId,
+        if (phone != null) 'phone': phone!.toJson(),
       };
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -293,6 +386,12 @@ class Item {
         buyer: j['buyer'] ?? '',
         qty: ((j['qty'] ?? 1) as num).toInt(),
         photos: ((j['photos'] ?? []) as List).cast<String>().toList(),
+        tradeInId: j['tradeInId'],
+        tradeInValue: ((j['tradeInValue'] ?? 0) as num).toInt(),
+        tradeFromId: j['tradeFromId'],
+        phone: j['phone'] == null
+            ? null
+            : PhoneSpec.fromJson((j['phone'] as Map).cast<String, dynamic>()),
       );
 }
 

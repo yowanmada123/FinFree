@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         floatingActionButton: _tab <= 1
             ? FloatingActionButton.extended(
+                heroTag: 'fab-catat',
                 onPressed: () => openTxForm(context),
                 icon: const Icon(Icons.edit_note_rounded),
                 label: const Text('Catat'),
