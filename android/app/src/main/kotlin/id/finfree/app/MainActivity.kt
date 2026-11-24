@@ -1,4 +1,4 @@
-package com.example.goes_to_financial_freedom
+package id.finfree.app
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

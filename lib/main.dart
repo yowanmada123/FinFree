@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'screens/home_screen.dart';
 import 'screens/lock_screen.dart';
+import 'storage.dart';
 import 'store.dart';
 
 const kAppName = 'FinFree';
@@ -11,7 +12,9 @@ const kAppName = 'FinFree';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('id_ID');
+  AppStore.I.backend = SqliteBackend();
   await AppStore.I.load();
+  await AppStore.photoDir();
   runApp(const FinFreeApp());
 }
 
@@ -143,6 +146,8 @@ class _LockGateState extends State<LockGate> {
       onShow: () {
         final p = _pausedAt;
         _pausedAt = null;
+        // transaksi rutin yang jatuh tempo selama aplikasi di latar belakang
+        AppStore.I.runRecurringNow();
         if (AppStore.I.hasPin &&
             !LockScreen.suspend &&
             p != null &&

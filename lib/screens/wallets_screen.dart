@@ -7,6 +7,7 @@ import '../store.dart';
 import '../widgets.dart';
 import 'asset_screens.dart';
 import 'categories_screen.dart';
+import 'debt_screens.dart';
 import 'home_screen.dart';
 
 class WalletsScreen extends StatelessWidget {
@@ -36,7 +37,11 @@ class WalletsScreen extends StatelessWidget {
               children: [
                 const Text('Kekayaan bersih',
                     style: TextStyle(color: Colors.white70)),
-                Text(money(s.totalBalance + s.totalAssets),
+                Text(
+                    money(s.totalBalance +
+                        s.totalAssets +
+                        s.totalReceivable -
+                        s.totalPayable),
                     style: const TextStyle(
                         color: Colors.white,
                         fontSize: 24,
@@ -53,6 +58,20 @@ class WalletsScreen extends StatelessWidget {
                         money(s.totalAssets)),
                   ),
                 ]),
+                if (s.debts.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(
+                      child: _pill(Icons.call_received_rounded, 'Piutang',
+                          money(s.totalReceivable)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _pill(Icons.call_made_rounded, 'Utang',
+                          '-${money(s.totalPayable)}'),
+                    ),
+                  ]),
+                ],
               ],
             ),
           ),
@@ -108,6 +127,10 @@ class WalletsScreen extends StatelessWidget {
               onTap: () => _open(context, w),
             );
           }),
+          const SizedBox(height: 16),
+          _sectionTitle(context, 'Utang & Piutang', Icons.handshake_rounded),
+          _debtCard(context, receivable: true),
+          _debtCard(context, receivable: false),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -152,6 +175,35 @@ class WalletsScreen extends StatelessWidget {
       ),
     );
     if (kind != null && context.mounted) editWallet(context, kind: kind);
+  }
+
+  Widget _debtCard(BuildContext context, {required bool receivable}) {
+    final s = AppStore.I;
+    final open =
+        s.debts.where((d) => d.isReceivable == receivable && !d.settled);
+    final overdue = open.where((d) => d.overdue).length;
+    final total = receivable ? s.totalReceivable : s.totalPayable;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: ListTile(
+        leading: CircleIcon(
+            icon: 'handshake',
+            color: receivable ? 0xFF1E88E5 : 0xFFB23A2E),
+        title: Text(receivable ? 'Piutang (orang ke saya)' : 'Utang saya'),
+        subtitle: Text(
+            open.isEmpty
+                ? 'Tidak ada yang belum lunas'
+                : '${open.length} belum lunas'
+                    '${overdue > 0 ? ' • $overdue lewat jatuh tempo' : ''}',
+            style: overdue > 0 ? const TextStyle(color: kExpenseColor) : null),
+        trailing: Text(money(total),
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => DebtsScreen(receivable: receivable))),
+      ),
+    );
   }
 
   Widget _pill(IconData icon, String label, String value) => Container(

@@ -6,6 +6,8 @@ import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
 import 'asset_screens.dart';
+import 'debt_screens.dart';
+import 'tools_screens.dart';
 import 'report_screen.dart';
 import 'settings_screen.dart';
 import 'trend_screen.dart';
@@ -77,6 +79,11 @@ Future<void> openTxForm(BuildContext context, {Txn? edit, Txn? copyFrom}) {
   if (itemId != null && AppStore.I.item(itemId) != null) {
     return openItem(context, itemId);
   }
+  // transaksi otomatis dari utang/piutang → buka catatannya
+  final debtId = edit?.debtId ?? copyFrom?.debtId;
+  if (debtId != null && AppStore.I.debt(debtId) != null) {
+    return openDebt(context, debtId);
+  }
   return Navigator.push(
       context,
       MaterialPageRoute(
@@ -87,7 +94,7 @@ Future<void> openTxForm(BuildContext context, {Txn? edit, Txn? copyFrom}) {
 }
 
 Future<void> showTxActions(BuildContext context, Txn t) async {
-  if (t.itemId != null) return openTxForm(context, edit: t);
+  if (t.isLinked) return openTxForm(context, edit: t);
   final r = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -284,6 +291,56 @@ class _TransactionsTabState extends State<TransactionsTab> {
             ),
           ),
         ),
+        if (_walletFilter == null && backupOverdue())
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Card(
+                margin: EdgeInsets.zero,
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: ListTile(
+                  leading: const Icon(Icons.save_alt_rounded),
+                  title: const Text('Cadangkan data Anda'),
+                  subtitle: Text(
+                      '${backupStatus()}. Tanpa cadangan, data hilang bila HP rusak/ganti.'),
+                  trailing: FilledButton.tonal(
+                    onPressed: () => saveBackup(context),
+                    child: const Text('Simpan'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (_walletFilter == null)
+          if (s.budgetCategories
+                  .where((c) => s.spentIn(_period, c.id) >= c.budget * 0.8)
+                  .toList()
+              case final warn when warn.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Card(
+                  margin: EdgeInsets.zero,
+                  child: ListTile(
+                    leading: const Icon(Icons.warning_amber_rounded,
+                        color: Color(0xFFE65100)),
+                    title: const Text('Anggaran hampir habis'),
+                    subtitle: Text(
+                        warn
+                            .map((c) =>
+                                '${c.name} ${(s.spentIn(_period, c.id) * 100 / c.budget).round()}%')
+                            .join(' • '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const BudgetsScreen())),
+                  ),
+                ),
+              ),
+            ),
         // Untung/rugi kategori "masuk & keluar" yang aktif di periode ini.
         if (_walletFilter == null)
           for (final c in s.bothCategories)

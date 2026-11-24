@@ -33,6 +33,7 @@ const Map<String, IconData> kIcons = {
   'insurance': Icons.health_and_safety_rounded,
   'tax': Icons.account_balance_rounded,
   'debt': Icons.credit_score_rounded,
+  'handshake': Icons.handshake_rounded,
   'other': Icons.category_rounded,
   // pemasukan
   'salary': Icons.work_rounded,

@@ -159,6 +159,23 @@ class _ReportScreenState extends State<ReportScreen> {
           const SizedBox(height: 8),
           SizedBox(height: 180, child: _dailyChart(list)),
           const SizedBox(height: 16),
+          if (s.budgetCategories.isNotEmpty) ...[
+            Text('Anggaran',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+            Text('Atur di Kategori → ubah kategori → Anggaran',
+                style: Theme.of(context).textTheme.bodySmall),
+            ...(s.budgetCategories
+                  ..sort((a, b) => (s.spentIn(_period, b.id) / b.budget)
+                      .compareTo(s.spentIn(_period, a.id) / a.budget)))
+                .map((c) => BudgetTile(
+                    c: c,
+                    period: _period,
+                    onTap: () => _openTrend(categoryId: c.id))),
+            const SizedBox(height: 16),
+          ],
           if (s.bothCategories.isNotEmpty) ...[
             Text('Untung/rugi per kategori',
                 style: Theme.of(context)

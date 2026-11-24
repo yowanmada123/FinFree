@@ -38,6 +38,9 @@ class _TxFormScreenState extends State<TxFormScreen> {
   String? _toWalletId;
   DateTime _date = DateTime.now();
 
+  /// Ulangi otomatis: null = tidak, 'monthly' / 'weekly'.
+  String? _repeat;
+
   bool get _isEdit => widget.edit != null;
 
   @override
@@ -108,6 +111,23 @@ class _TxFormScreenState extends State<TxFormScreen> {
       toast(context, 'Pilih kategori');
       return;
     }
+    Recurring? rec;
+    if (!_isEdit && _repeat != null) {
+      // transaksi ini = kejadian pertama; berikutnya dicatat otomatis
+      rec = Recurring(
+        id: newId(),
+        type: _type,
+        amount: amount,
+        categoryId: _type == TxType.transfer ? null : _categoryId,
+        walletId: _walletId,
+        toWalletId: _type == TxType.transfer ? _toWalletId : null,
+        note: _note.text.trim(),
+        freq: _repeat!,
+        day: _repeat == 'weekly' ? _date.weekday : _date.day.clamp(1, 28),
+        startDate: _date,
+        lastRun: DateTime(_date.year, _date.month, _date.day),
+      );
+    }
     final t = Txn(
       id: widget.edit?.id ?? newId(),
       type: _type,
@@ -117,19 +137,43 @@ class _TxFormScreenState extends State<TxFormScreen> {
       toWalletId: _type == TxType.transfer ? _toWalletId : null,
       note: _note.text.trim(),
       date: _date,
+      recurringId: rec?.id ?? widget.edit?.recurringId,
     );
     await s.upsertTxn(t);
+    if (rec != null) await s.upsertRecurring(rec);
     if (!mounted) return;
+    _budgetHint(t);
+    if (rec != null) {
+      toast(context,
+          'Tersimpan & akan dicatat otomatis ${_repeatLabel(rec.freq, rec.day)}');
+    }
     if (again) {
       toast(context, 'Tersimpan: ${rupiah(amount)}');
       setState(() {
         _amount.clear();
         _note.clear();
         _date = DateTime.now();
+        _repeat = null;
       });
       _amountFocus.requestFocus();
     } else {
       Navigator.pop(context);
+    }
+  }
+
+  /// Info anggaran setelah mencatat pengeluaran.
+  void _budgetHint(Txn t) {
+    final c = s.category(t.categoryId);
+    if (t.type != TxType.expense || c == null || c.budget <= 0) return;
+    final p = Period.cycle(t.date, s.cycleStartDay);
+    final spent = s.spentIn(p, c.id);
+    final pct = spent * 100 / c.budget;
+    if (pct >= 100) {
+      toast(context,
+          '⚠️ Anggaran ${c.name} terlewati ${rupiah(spent - c.budget)}');
+    } else if (pct >= 80) {
+      toast(context,
+          'Anggaran ${c.name} sudah ${pct.round()}% • sisa ${rupiah(c.budget - spent)}');
     }
   }
 
@@ -274,6 +318,43 @@ class _TxFormScreenState extends State<TxFormScreen> {
             trailing: const Icon(Icons.edit_calendar_rounded),
             onTap: _pickDate,
           ),
+          if (!_isEdit) ...[
+            const SizedBox(height: 12),
+            Text('Ulangi otomatis',
+                style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 4, children: [
+              for (final (v, label) in [
+                (null, 'Tidak'),
+                ('monthly', _repeatLabel('monthly', _date.day.clamp(1, 28))),
+                ('weekly', _repeatLabel('weekly', _date.weekday)),
+              ])
+                ChoiceChip(
+                  avatar: v == null ? null : const Icon(Icons.repeat_rounded, size: 18),
+                  label: Text(label),
+                  selected: _repeat == v,
+                  onSelected: (_) => setState(() => _repeat = v),
+                ),
+            ]),
+            if (_repeat == 'monthly' && _date.day > 28)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                    'Tanggal 29–31 tidak ada di semua bulan, jadi dicatat tiap tanggal 28.',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ),
+          ] else if (widget.edit?.recurringId != null) ...[
+            const SizedBox(height: 12),
+            Row(children: [
+              const Icon(Icons.repeat_rounded, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    'Bagian dari transaksi rutin. Atur di Atur → Transaksi rutin.',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ),
+            ]),
+          ],
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -325,15 +406,18 @@ class _TxFormScreenState extends State<TxFormScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: sel ? Color(c.color) : Colors.transparent,
+                color: sel ? typeColor(_type, context) : Colors.transparent,
                 width: 2,
               ),
-              color: sel ? Color(c.color).withValues(alpha: 0.08) : null,
+              color: sel ? typeColor(_type, context).withValues(alpha: 0.08) : null,
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                CircleIcon(icon: c.icon, color: c.color, size: 36),
+                CircleIcon(
+                    icon: c.icon,
+                    color: typeColor(_type, context).toARGB32(),
+                    size: 36),
                 const SizedBox(height: 4),
                 Text(
                   c.name,
@@ -415,3 +499,11 @@ class _TxFormScreenState extends State<TxFormScreen> {
     );
   }
 }
+
+const _weekdays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+
+String _repeatLabel(String freq, int day) =>
+    freq == 'weekly' ? 'Tiap ${_weekdays[day - 1]}' : 'Tiap tgl $day';
+
+/// Label jadwal transaksi rutin (dipakai halaman pengaturan).
+String repeatLabel(Recurring r) => _repeatLabel(r.freq, r.day);

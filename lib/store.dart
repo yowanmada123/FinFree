@@ -1,13 +1,16 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show ChangeNotifier, ValueNotifier;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'format.dart';
 import 'models.dart';
+import 'storage.dart';
 
 const _uuid = Uuid();
 const kDefaultThemeColor = 0xFF0F766E;
@@ -18,15 +21,21 @@ class AppStore extends ChangeNotifier {
   AppStore._();
   static final AppStore I = AppStore._();
 
-  static const _kData = 'finfree_data_v1';
+  /// Format lama (satu blok JSON di SharedPreferences) — dimigrasi otomatis.
+  static const _kLegacyData = 'finfree_data_v1';
   static const _kSecurity = 'finfree_security_v1';
 
+  /// Diganti ke [SqliteBackend] oleh main(); test memakai [PrefsBackend].
+  DataBackend backend = PrefsBackend();
   late SharedPreferences _prefs;
+  Rows _saved = {};
 
   List<Wallet> wallets = [];
   List<Category> categories = [];
   List<Txn> txns = [];
   List<Item> items = [];
+  List<Debt> debts = [];
+  List<Recurring> recurrings = [];
 
   // pengaturan
   int cycleStartDay = 1;
@@ -34,6 +43,7 @@ class AppStore extends ChangeNotifier {
   String? lastExpenseCategoryId;
   String? lastIncomeCategoryId;
   String? lastWalletId;
+  DateTime? lastBackupAt;
 
   /// Tampilan: warna tema & mode terang/gelap ('system' | 'light' | 'dark').
   /// Dipisah sebagai notifier sendiri agar MaterialApp hanya rebuild saat
@@ -50,14 +60,23 @@ class AppStore extends ChangeNotifier {
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
-    final raw = _prefs.getString(_kData);
-    if (raw == null) {
-      _seed();
-      await _save();
+    final rows = await backend.readAll();
+    _saved = {};
+    if (rows.values.any((m) => m.isNotEmpty)) {
+      _fromRows(rows);
+      _saved = rows;
     } else {
-      _fromJson(jsonDecode(raw) as Map<String, dynamic>, notify: false);
-      if (_mergeSameName()) await _save();
+      final legacy = _prefs.getString(_kLegacyData);
+      if (legacy != null) {
+        // pindahkan data format lama ke penyimpanan baru
+        _fromJson(jsonDecode(legacy) as Map<String, dynamic>, notify: false);
+      } else {
+        _seed();
+      }
+      await _save();
+      if (legacy != null) await _prefs.remove(_kLegacyData);
     }
+    if (_runRecurring()) await _save();
     final sec = _prefs.getString(_kSecurity);
     if (sec != null) {
       final j = jsonDecode(sec) as Map<String, dynamic>;
@@ -101,48 +120,125 @@ class AppStore extends ChangeNotifier {
     ];
     txns = [];
     items = [];
+    debts = [];
+    recurrings = [];
   }
 
   // ---------- persistensi ----------
-  Map<String, dynamic> _toJson() => {
-        'app': 'finfree',
-        'version': 1,
-        'exportedAt': DateTime.now().toIso8601String(),
-        'wallets': wallets.map((e) => e.toJson()).toList(),
-        'categories': categories.map((e) => e.toJson()).toList(),
-        'txns': txns.map((e) => e.toJson()).toList(),
-        'items': items.map((e) => e.toJson()).toList(),
-        'settings': {
-          'cycleStartDay': cycleStartDay,
-          'hideBalance': hideBalance,
-          'lastExpenseCategoryId': lastExpenseCategoryId,
-          'lastIncomeCategoryId': lastIncomeCategoryId,
-          'lastWalletId': lastWalletId,
-          'themeColor': themeColor.value,
-          'themeMode': themeMode.value,
-        },
+  Map<String, dynamic> _settingsJson() => {
+        'cycleStartDay': cycleStartDay,
+        'hideBalance': hideBalance,
+        'lastExpenseCategoryId': lastExpenseCategoryId,
+        'lastIncomeCategoryId': lastIncomeCategoryId,
+        'lastWalletId': lastWalletId,
+        'lastBackupAt': lastBackupAt?.toIso8601String(),
+        'themeColor': themeColor.value,
+        'themeMode': themeMode.value,
       };
 
-  void _fromJson(Map<String, dynamic> j, {bool notify = true}) {
-    wallets = (j['wallets'] as List).map((e) => Wallet.fromJson(e)).toList();
-    categories =
-        (j['categories'] as List).map((e) => Category.fromJson(e)).toList();
-    txns = (j['txns'] as List).map((e) => Txn.fromJson(e)).toList();
-    items = ((j['items'] ?? []) as List).map((e) => Item.fromJson(e)).toList();
-    final s = (j['settings'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+  void _applySettings(Map<String, dynamic> s) {
     cycleStartDay = s['cycleStartDay'] ?? 1;
     hideBalance = s['hideBalance'] ?? false;
     lastExpenseCategoryId = s['lastExpenseCategoryId'];
     lastIncomeCategoryId = s['lastIncomeCategoryId'];
     lastWalletId = s['lastWalletId'];
+    lastBackupAt = s['lastBackupAt'] != null
+        ? DateTime.tryParse(s['lastBackupAt'])
+        : null;
     themeColor.value = s['themeColor'] ?? kDefaultThemeColor;
     themeMode.value = s['themeMode'] ?? 'system';
+  }
+
+  /// Format cadangan (dan format lama): satu objek JSON berisi semuanya.
+  Map<String, dynamic> _toJson() => {
+        'app': 'finfree',
+        'version': 2,
+        'exportedAt': DateTime.now().toIso8601String(),
+        'wallets': wallets.map((e) => e.toJson()).toList(),
+        'categories': categories.map((e) => e.toJson()).toList(),
+        'txns': txns.map((e) => e.toJson()).toList(),
+        'items': items.map((e) => e.toJson()).toList(),
+        'debts': debts.map((e) => e.toJson()).toList(),
+        'recurrings': recurrings.map((e) => e.toJson()).toList(),
+        'settings': _settingsJson(),
+      };
+
+  void _fromJson(Map<String, dynamic> j, {bool notify = true}) {
+    // parse dulu semuanya; bila ada yang rusak, data lama tidak tersentuh
+    List<T> list<T>(String k, T Function(Map<String, dynamic>) f) =>
+        ((j[k] ?? []) as List).map((e) => f(e as Map<String, dynamic>)).toList();
+    final w = list('wallets', Wallet.fromJson);
+    final c = list('categories', Category.fromJson);
+    final t = list('txns', Txn.fromJson);
+    final it = list('items', Item.fromJson);
+    final d = list('debts', Debt.fromJson);
+    final r = list('recurrings', Recurring.fromJson);
+    if (w.isEmpty) throw const FormatException('Tidak ada dompet');
+    wallets = w;
+    categories = c;
+    txns = t;
+    items = it;
+    debts = d;
+    recurrings = r;
+    _applySettings(
+        (j['settings'] ?? <String, dynamic>{}) as Map<String, dynamic>);
     _sortTxns();
     if (notify) notifyListeners();
   }
 
-  Future<void> _save() async {
-    await _prefs.setString(_kData, jsonEncode(_toJson()));
+  static const _collections = [
+    'wallets', 'categories', 'txns', 'items', 'debts', 'recurrings'
+  ];
+
+  Rows _snapshot() {
+    Map<String, String> enc<T>(List<T> l, String Function(T) id,
+            Map<String, dynamic> Function(T) js) =>
+        {for (final e in l) id(e): jsonEncode(js(e))};
+    return {
+      'wallets': enc(wallets, (e) => e.id, (e) => e.toJson()),
+      'categories': enc(categories, (e) => e.id, (e) => e.toJson()),
+      'txns': enc(txns, (e) => e.id, (e) => e.toJson()),
+      'items': enc(items, (e) => e.id, (e) => e.toJson()),
+      'debts': enc(debts, (e) => e.id, (e) => e.toJson()),
+      'recurrings': enc(recurrings, (e) => e.id, (e) => e.toJson()),
+      'meta': {'settings': jsonEncode(_settingsJson())},
+    };
+  }
+
+  void _fromRows(Rows rows) {
+    List<T> dec<T>(String coll, T Function(Map<String, dynamic>) f) =>
+        (rows[coll] ?? {}).values.map((s) => f(jsonDecode(s))).toList();
+    wallets = dec('wallets', Wallet.fromJson);
+    categories = dec('categories', Category.fromJson);
+    txns = dec('txns', Txn.fromJson);
+    items = dec('items', Item.fromJson);
+    debts = dec('debts', Debt.fromJson);
+    recurrings = dec('recurrings', Recurring.fromJson);
+    final s = rows['meta']?['settings'];
+    _applySettings(s != null ? jsonDecode(s) : <String, dynamic>{});
+    _sortTxns();
+  }
+
+  /// Tulis hanya baris yang berubah sejak penyimpanan terakhir.
+  /// Selisih dihitung seketika (sinkron) sehingga urutan tulis selalu
+  /// sesuai urutan perubahan; backend menjalankannya berurutan (FIFO).
+  Future<void> _save() {
+    final now = _snapshot();
+    final changes = <String, Map<String, String?>>{};
+    for (final coll in {..._collections, 'meta', ..._saved.keys}) {
+      final a = _saved[coll] ?? const {}, b = now[coll] ?? const {};
+      final ch = <String, String?>{};
+      b.forEach((id, js) {
+        if (a[id] != js) ch[id] = js;
+      });
+      for (final id in a.keys) {
+        if (!b.containsKey(id)) ch[id] = null;
+      }
+      if (ch.isNotEmpty) changes[coll] = ch;
+    }
+    _saved = now;
+    if (changes.isEmpty) return Future.value();
+    return backend.apply(changes);
   }
 
   Future<void> _commit() async {
@@ -152,6 +248,73 @@ class AppStore extends ChangeNotifier {
   }
 
   void _sortTxns() => txns.sort((a, b) => b.date.compareTo(a.date));
+
+  // ---------- cadangan (file lokal, tanpa internet) ----------
+  /// Lokasi folder foto (diisi di main(); null saat test).
+  static String? photoPath;
+
+  static Future<Directory> photoDir() async {
+    final d = Directory(
+        '${(await getApplicationDocumentsDirectory()).path}/photos');
+    if (!d.existsSync()) d.createSync(recursive: true);
+    photoPath = d.path;
+    return d;
+  }
+
+  /// Isi file cadangan (JSON). Foto barang ikut disertakan.
+  Future<String> exportBackup() async {
+    final j = _toJson();
+    final names = {for (final i in items) ...i.photos};
+    if (names.isNotEmpty) {
+      final dir = await photoDir();
+      j['photos'] = {
+        for (final n in names)
+          if (File('${dir.path}/$n').existsSync())
+            n: base64Encode(File('${dir.path}/$n').readAsBytesSync()),
+      };
+    }
+    return jsonEncode(j);
+  }
+
+  Future<void> markBackedUp() async {
+    lastBackupAt = DateTime.now();
+    await _commit();
+  }
+
+  /// Ringkasan isi file cadangan (untuk konfirmasi sebelum dipulihkan).
+  static ({int txns, int items, DateTime? at}) inspectBackup(String raw) {
+    final j = jsonDecode(raw);
+    if (j is! Map<String, dynamic> || j['app'] != 'finfree') {
+      throw const FormatException('Bukan file cadangan FinFree');
+    }
+    return (
+      txns: (j['txns'] as List? ?? []).length,
+      items: (j['items'] as List? ?? []).length,
+      at: DateTime.tryParse(j['exportedAt'] ?? ''),
+    );
+  }
+
+  /// Ganti seluruh data dengan isi file cadangan.
+  Future<void> importBackup(String raw) async {
+    inspectBackup(raw);
+    final j = jsonDecode(raw) as Map<String, dynamic>;
+    final theme = (themeColor.value, themeMode.value);
+    _fromJson(j, notify: false);
+    final photos = (j['photos'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+    if (photos.isNotEmpty) {
+      final dir = await photoDir();
+      photos.forEach((n, b64) =>
+          File('${dir.path}/$n').writeAsBytesSync(base64Decode(b64)));
+    }
+    if (j['settings']?['themeColor'] == null) {
+      themeColor.value = theme.$1;
+      themeMode.value = theme.$2;
+    }
+    final snap = _snapshot();
+    await backend.replaceAll(snap);
+    _saved = snap;
+    notifyListeners();
+  }
 
   // ---------- lookup ----------
   Wallet? wallet(String? id) =>
@@ -221,6 +384,19 @@ class AppStore extends ChangeNotifier {
   int get totalAssets =>
       assetWallets.fold(0, (s, w) => s + walletBalance(w.id));
 
+  // ---------- anggaran ----------
+  List<Category> get budgetCategories => categories
+      .where((c) => c.budget > 0 && c.usableFor(TxType.expense))
+      .toList();
+
+  /// Pengeluaran kategori pada periode (untuk anggaran).
+  int spentIn(Period p, String catId) => txns
+      .where((t) =>
+          t.type == TxType.expense &&
+          t.categoryId == catId &&
+          p.contains(t.date))
+      .fold(0, (s, t) => s + t.amount);
+
   // ---------- barang dagangan ----------
   List<Item> itemsOf(String walletId) =>
       items.where((i) => i.walletId == walletId).toList()
@@ -238,33 +414,36 @@ class AppStore extends ChangeNotifier {
     return n;
   }
 
+  bool _isCash(String? id) =>
+      id != null && id.isNotEmpty && wallet(id) != null && !wallet(id)!.isAsset;
+
   /// Bangun ulang transaksi kas yang terhubung ke barang.
   void _syncItemTxns(Item it) {
     txns.removeWhere((t) => t.itemId == it.id);
-    bool cash(String? id) => id != null && wallet(id) != null && !wallet(id)!.isAsset;
-    if (cash(it.buyWalletId) && it.buyPrice > 0) {
+    final label = it.qty > 1 ? '${it.name} ×${it.qty}' : it.name;
+    if (_isCash(it.buyWalletId) && it.buyPrice > 0) {
       txns.add(Txn(
         id: newId(), itemId: it.id, type: TxType.transfer,
         amount: it.buyPrice, walletId: it.buyWalletId!, toWalletId: it.walletId,
-        date: it.buyDate, note: 'Beli ${it.name}',
+        date: it.buyDate, note: 'Beli $label',
       ));
     }
     for (final c in it.costs) {
-      if (cash(c.walletId) && c.amount > 0) {
+      if (_isCash(c.walletId) && c.amount > 0) {
         txns.add(Txn(
           id: newId(), itemId: it.id, type: TxType.transfer,
           amount: c.amount, walletId: c.walletId!, toWalletId: it.walletId,
-          date: c.date, note: '${c.name.isEmpty ? 'Biaya' : c.name} • ${it.name}',
+          date: c.date, note: '${c.name.isEmpty ? 'Biaya' : c.name} • $label',
         ));
       }
     }
-    if (it.sold && cash(it.sellWalletId)) {
+    if (it.sold && _isCash(it.sellWalletId)) {
       final date = it.sellDate ?? DateTime.now();
       // modal kembali ke kas
       txns.add(Txn(
         id: newId(), itemId: it.id, type: TxType.transfer,
         amount: it.totalCost, walletId: it.walletId, toWalletId: it.sellWalletId,
-        date: date, note: 'Modal kembali • ${it.name}',
+        date: date, note: 'Modal kembali • $label',
       ));
       // selisih = laba (pemasukan) atau rugi (pengeluaran)
       if (it.profit > 0) {
@@ -272,14 +451,14 @@ class AppStore extends ChangeNotifier {
         txns.add(Txn(
           id: newId(), itemId: it.id, type: TxType.income, amount: it.profit,
           categoryId: c.id, walletId: it.sellWalletId!, date: date,
-          note: 'Laba jual ${it.name}',
+          note: 'Laba jual $label',
         ));
       } else if (it.profit < 0) {
         final c = _ensureCategory('Rugi Penjualan', TxType.expense, 'debt', 0xFFC62828);
         txns.add(Txn(
           id: newId(), itemId: it.id, type: TxType.expense, amount: -it.profit,
           categoryId: c.id, walletId: it.sellWalletId!, date: date,
-          note: 'Rugi jual ${it.name}',
+          note: 'Rugi jual $label',
         ));
       }
     }
@@ -292,10 +471,84 @@ class AppStore extends ChangeNotifier {
     await _commit();
   }
 
+  /// Jual [qty] unit dari barang. Bila sebagian, barang dipecah: bagian yang
+  /// terjual jadi catatan sendiri (modal & biaya dibagi proporsional), sisanya
+  /// tetap di stok. [price] = total harga jual untuk unit yang terjual.
+  Future<Item> sellItem(Item it,
+      {required int qty,
+      required int price,
+      required DateTime date,
+      String? walletId,
+      String buyer = ''}) async {
+    if (qty >= it.qty) {
+      it
+        ..sold = true
+        ..sellPrice = price
+        ..sellDate = date
+        ..sellWalletId = walletId
+        ..buyer = buyer;
+      await upsertItem(it);
+      return it;
+    }
+    final f = qty / it.qty;
+    final part = Item(
+      id: newId(),
+      walletId: it.walletId,
+      name: it.name,
+      detail: it.detail,
+      buyPrice: (it.buyPrice * f).round(),
+      buyDate: it.buyDate,
+      buyWalletId: it.buyWalletId,
+      supplier: it.supplier,
+      costs: [
+        for (final c in it.costs)
+          ItemCost(
+              id: newId(),
+              name: c.name,
+              amount: (c.amount * f).round(),
+              date: c.date,
+              walletId: c.walletId),
+      ],
+      targetPrice: (it.targetPrice * f).round(),
+      qty: qty,
+      sold: true,
+      sellPrice: price,
+      sellDate: date,
+      sellWalletId: walletId,
+      buyer: buyer,
+      photos: List.of(it.photos),
+    );
+    it.buyPrice -= part.buyPrice;
+    for (var i = 0; i < it.costs.length; i++) {
+      it.costs[i].amount -= part.costs[i].amount;
+    }
+    it.targetPrice -= part.targetPrice;
+    it.qty -= qty;
+    items.add(part);
+    _syncItemTxns(it);
+    _syncItemTxns(part);
+    await _commit();
+    return part;
+  }
+
   Future<void> deleteItem(String id) async {
+    final it = item(id);
     items.removeWhere((i) => i.id == id);
     txns.removeWhere((t) => t.itemId == id);
+    for (final ph in it?.photos ?? const <String>[]) {
+      await deletePhotoIfUnused(ph);
+    }
     await _commit();
+  }
+
+  /// Hapus file foto bila tidak dipakai barang lain (barang hasil pecahan
+  /// jual sebagian berbagi foto yang sama).
+  Future<void> deletePhotoIfUnused(String name) async {
+    if (items.any((i) => i.photos.contains(name))) return;
+    try {
+      final f = File('${(await photoDir()).path}/$name');
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
   }
 
   /// Ringkasan dompet aset.
@@ -305,15 +558,117 @@ class AppStore extends ChangeNotifier {
     final stock = list.where((i) => !i.sold);
     final sold = list.where((i) => i.sold);
     return (
-      stockCount: stock.length,
+      stockCount: stock.fold(0, (s, i) => s + i.qty),
       stockValue: stock.fold(0, (s, i) => s + i.totalCost),
-      soldCount: sold.length,
+      soldCount: sold.fold(0, (s, i) => s + i.qty),
       revenue: sold.fold(0, (s, i) => s + i.sellPrice),
       profit: sold.fold(0, (s, i) => s + i.profit),
       potential: stock.fold(0, (s, i) => s + i.potentialProfit),
     );
   }
 
+  // ---------- utang & piutang ----------
+  Debt? debt(String? id) => debts.where((d) => d.id == id).firstOrNull;
+
+  /// Total sisa piutang (orang berutang ke saya) & utang (saya berutang).
+  int get totalReceivable => debts
+      .where((d) => d.isReceivable && !d.settled)
+      .fold(0, (s, d) => s + d.remaining);
+  int get totalPayable => debts
+      .where((d) => !d.isReceivable && !d.settled)
+      .fold(0, (s, d) => s + d.remaining);
+
+  /// Transaksi kas otomatis dari utang/piutang. Memakai tipe transfer
+  /// dengan satu sisi kosong ('' / null), jadi saldo dompet berubah tapi
+  /// TIDAK dihitung sebagai pemasukan/pengeluaran di laporan.
+  void _syncDebtTxns(Debt d) {
+    txns.removeWhere((t) => t.debtId == d.id);
+    final recv = d.isReceivable;
+    void move(int amount, String w, DateTime date, String note,
+        {required bool out}) {
+      if (amount <= 0) return;
+      txns.add(Txn(
+        id: newId(), debtId: d.id, type: TxType.transfer, amount: amount,
+        walletId: out ? w : '', toWalletId: out ? null : w,
+        date: date, note: note,
+      ));
+    }
+
+    if (_isCash(d.walletId)) {
+      move(d.amount, d.walletId!, d.date,
+          recv ? 'Pinjamkan ke ${d.person}' : 'Pinjam dari ${d.person}',
+          out: recv);
+    }
+    for (final p in d.payments) {
+      if (_isCash(p.walletId)) {
+        move(p.amount, p.walletId!, p.date,
+            recv ? 'Terima cicilan ${d.person}' : 'Bayar utang ke ${d.person}',
+            out: !recv);
+      }
+    }
+  }
+
+  Future<void> upsertDebt(Debt d) async {
+    final i = debts.indexWhere((e) => e.id == d.id);
+    i >= 0 ? debts[i] = d : debts.add(d);
+    _syncDebtTxns(d);
+    await _commit();
+  }
+
+  Future<void> deleteDebt(String id) async {
+    debts.removeWhere((d) => d.id == id);
+    txns.removeWhere((t) => t.debtId == id);
+    await _commit();
+  }
+
+  // ---------- transaksi rutin ----------
+  Recurring? recurring(String? id) =>
+      recurrings.where((r) => r.id == id).firstOrNull;
+
+  /// Catat semua transaksi rutin yang sudah jatuh tempo (termasuk yang
+  /// terlewat saat aplikasi tidak dibuka).
+  bool _runRecurring([DateTime? now]) {
+    now ??= DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    var changed = false;
+    for (final r in recurrings.where((r) => r.active)) {
+      for (final d in r.dueDates(today)) {
+        txns.add(Txn(
+          id: newId(), recurringId: r.id, type: r.type, amount: r.amount,
+          categoryId: r.categoryId, walletId: r.walletId,
+          toWalletId: r.toWalletId, note: r.note,
+          date: DateTime(d.year, d.month, d.day, 8),
+        ));
+        r.lastRun = d;
+        changed = true;
+      }
+    }
+    if (changed) _sortTxns();
+    return changed;
+  }
+
+  /// Dipanggil saat aplikasi dibuka kembali (mis. besok paginya).
+  Future<void> runRecurringNow([DateTime? now]) async {
+    if (_runRecurring(now)) await _commit();
+  }
+
+  Future<void> upsertRecurring(Recurring r) async {
+    final i = recurrings.indexWhere((e) => e.id == r.id);
+    i >= 0 ? recurrings[i] = r : recurrings.add(r);
+    _runRecurring();
+    await _commit();
+  }
+
+  /// Hapus aturan rutin; transaksi yang sudah tercatat tetap ada.
+  Future<void> deleteRecurring(String id) async {
+    recurrings.removeWhere((r) => r.id == id);
+    for (final t in txns.where((t) => t.recurringId == id)) {
+      t.recurringId = null;
+    }
+    await _commit();
+  }
+
+  // ---------- query ----------
   List<Txn> txnsIn(Period p, {String? walletId}) => txns
       .where((t) =>
           p.contains(t.date) &&
@@ -333,7 +688,7 @@ class AppStore extends ChangeNotifier {
     final seen = <String>{};
     final out = <Txn>[];
     for (final t in txns) {
-      if (t.type != type) continue;
+      if (t.type != type || t.isLinked) continue;
       final key = '${t.categoryId}|${t.note.trim().toLowerCase()}|${t.amount}';
       if (seen.add(key)) out.add(t);
       if (out.length >= limit) break;
@@ -401,6 +756,13 @@ class AppStore extends ChangeNotifier {
         if (c.walletId == id) c.walletId = null;
       }
     }
+    for (final d in debts) {
+      if (d.walletId == id) d.walletId = null;
+      for (final p in d.payments) {
+        if (p.walletId == id) p.walletId = null;
+      }
+    }
+    recurrings.removeWhere((r) => r.walletId == id || r.toWalletId == id);
     wallets.removeWhere((w) => w.id == id);
     await _commit();
   }
@@ -409,44 +771,29 @@ class AppStore extends ChangeNotifier {
   Future<void> upsertCategory(Category c) async {
     final i = categories.indexWhere((e) => e.id == c.id);
     i >= 0 ? categories[i] = c : categories.add(c);
-    _mergeSameName(prefer: c.id);
     await _commit();
   }
 
-  /// Kategori bernama sama di Pengeluaran & Pemasukan (mis. "Laundry" di
-  /// keduanya) digabung jadi SATU kategori "masuk & keluar", supaya
-  /// untung/ruginya bisa dihitung. Transaksinya dipindah ke kategori gabungan.
-  /// "Lainnya" dikecualikan karena memang wajar ada di dua sisi.
-  bool _mergeSameName({String? prefer}) {
-    var changed = false;
-    final keepBy = <String, Category>{};
-    final ordered = [
-      ...categories.where((c) => c.id == prefer),
-      ...categories.where((c) => c.id != prefer),
-    ];
-    for (final c in ordered) {
-      final key = c.name.trim().toLowerCase();
-      if (key.isEmpty || key == 'lainnya') continue;
-      final keep = keepBy[key];
-      if (keep == null) {
-        keepBy[key] = c;
-        continue;
-      }
-      // dua kategori satu sisi yang sama persis: biarkan (bukan masuk & keluar)
-      if (!keep.both && !c.both && keep.type == c.type) continue;
-      keep.both = true;
-      for (final t in txns) {
-        if (t.categoryId == c.id) t.categoryId = keep.id;
-      }
-      if (lastExpenseCategoryId == c.id) lastExpenseCategoryId = keep.id;
-      if (lastIncomeCategoryId == c.id) lastIncomeCategoryId = keep.id;
-      categories.removeWhere((e) => e.id == c.id);
-      changed = true;
+  /// Gabungkan [otherId] ke [keepId] jadi satu kategori "masuk & keluar".
+  /// Transaksi, anggaran & transaksi rutinnya ikut pindah.
+  Future<void> mergeCategories(String keepId, String otherId) async {
+    final keep = category(keepId), other = category(otherId);
+    if (keep == null || other == null || keepId == otherId) return;
+    keep.both = true;
+    if (keep.budget == 0) keep.budget = other.budget;
+    for (final t in txns) {
+      if (t.categoryId == otherId) t.categoryId = keepId;
     }
-    return changed;
+    for (final r in recurrings) {
+      if (r.categoryId == otherId) r.categoryId = keepId;
+    }
+    if (lastExpenseCategoryId == otherId) lastExpenseCategoryId = keepId;
+    if (lastIncomeCategoryId == otherId) lastIncomeCategoryId = keepId;
+    categories.removeWhere((e) => e.id == otherId);
+    await _commit();
   }
 
-  /// Kategori yang punya nama sama di sisi lain (calon digabung).
+  /// Kategori bernama sama di sisi lain (calon digabung).
   Category? sameNameOther(String name, TxType type, {String? exceptId}) {
     final key = name.trim().toLowerCase();
     if (key.isEmpty || key == 'lainnya') return null;
@@ -468,6 +815,9 @@ class AppStore extends ChangeNotifier {
   Future<void> deleteCategory(String id, {String? moveTo}) async {
     for (final t in txns.where((t) => t.categoryId == id)) {
       t.categoryId = moveTo;
+    }
+    for (final r in recurrings.where((r) => r.categoryId == id)) {
+      r.categoryId = moveTo;
     }
     categories.removeWhere((c) => c.id == id);
     await _commit();

@@ -4,7 +4,11 @@ import 'package:goes_to_financial_freedom/main.dart';
 import 'package:goes_to_financial_freedom/models.dart';
 import 'package:goes_to_financial_freedom/screens/asset_screens.dart';
 import 'package:goes_to_financial_freedom/screens/categories_screen.dart';
+import 'package:goes_to_financial_freedom/screens/debt_screens.dart';
 import 'package:goes_to_financial_freedom/screens/home_screen.dart';
+import 'package:goes_to_financial_freedom/screens/tools_screens.dart';
+import 'package:goes_to_financial_freedom/screens/tx_form_screen.dart';
+import 'package:goes_to_financial_freedom/screens/wallets_screen.dart';
 import 'package:goes_to_financial_freedom/screens/settings_screen.dart';
 import 'package:goes_to_financial_freedom/screens/trend_screen.dart';
 import 'package:goes_to_financial_freedom/store.dart';
@@ -168,6 +172,12 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.text('Atur'));
     await t.pumpAndSettle();
+    await t.scrollUntilVisible(find.text('Tema warna'), 200,
+        scrollable: find
+            .descendant(
+                of: find.byType(SettingsScreen),
+                matching: find.byType(Scrollable))
+            .first);
     await t.tap(find.text('Tema warna'));
     await t.pumpAndSettle();
     await t.tap(find.text('Ungu'));
@@ -199,4 +209,79 @@ void main() {
       expect(t.takeException(), isNull, reason: '$w');
     }
   });
+
+  testWidgets('layar baru: utang, anggaran, rutin, qty — tanpa teks meluber',
+      (t) async {
+    t.view.physicalSize = const Size(1080, 2400);
+    t.view.devicePixelRatio = 2.75;
+    final s = AppStore.I;
+    final cash = s.cashWallets.first;
+    final cat = s.categoriesOf(TxType.expense).first..budget = 3000000;
+    await s.upsertCategory(cat);
+    await s.upsertDebt(Debt(id: 'd1', kind: 'receivable',
+        person: 'Budi Santoso Wijaya', amount: 2500000,
+        date: DateTime.now(), walletId: cash.id,
+        dueDate: DateTime.now().subtract(const Duration(days: 3)),
+        note: 'DP iPhone 13 Pro Max', payments: [
+          DebtPayment(id: 'p1', amount: 500000, date: DateTime.now(),
+              walletId: cash.id),
+        ]));
+    await s.upsertDebt(Debt(id: 'd2', kind: 'payable', person: 'Supplier',
+        amount: 1000000, date: DateTime.now()));
+    await s.upsertRecurring(Recurring(id: 'r1', type: TxType.expense,
+        amount: 750000, categoryId: cat.id, walletId: cash.id,
+        freq: 'monthly', day: 28, startDate: DateTime.now(),
+        lastRun: DateTime.now(), note: 'Cicilan motor'));
+    final asset = s.assetWallets.first;
+    await s.upsertItem(Item(id: 'q1', walletId: asset.id,
+        name: 'Casing iPhone 15 Pro Max MagSafe', qty: 12,
+        buyPrice: 1200000, buyDate: DateTime.now(), targetPrice: 1800000));
+
+    for (final w in <Widget>[
+      const DebtsScreen(),
+      const DebtsScreen(receivable: false),
+      const DebtDetailScreen(debtId: 'd1'),
+      const BudgetsScreen(),
+      const RecurringScreen(),
+      const SettingsScreen(),
+      const WalletsScreen(),
+      const TxFormScreen(),
+      const ItemDetailScreen(itemId: 'q1'),
+      AssetWalletScreen(walletId: asset.id),
+      const HomeScreen(),
+    ]) {
+      await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: Builder(
+          builder: (c) => MediaQuery(
+            data: MediaQuery.of(c)
+                .copyWith(textScaler: const TextScaler.linear(1.15)),
+            child: w,
+          ),
+        ),
+      ));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull, reason: '$w');
+    }
+
+    // lembar jual sebagian & bayar cicilan terbuka tanpa error
+    await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: const ItemDetailScreen(itemId: 'q1')));
+    await t.pumpAndSettle();
+    expect(find.textContaining('×12'), findsWidgets);
+    await t.tap(find.text('Jual (stok 12)'));
+    await t.pumpAndSettle();
+    expect(find.text('12 / 12'), findsOneWidget);
+    expect(t.takeException(), isNull);
+
+    await t.pumpWidget(MaterialApp(
+        theme: FinFreeApp.theme(Brightness.light),
+        home: const DebtDetailScreen(debtId: 'd1')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Terima bayaran'));
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+  });
+
 }

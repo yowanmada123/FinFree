@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Ambil foto barang dagangan atau nota</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pilih foto barang dagangan atau nota</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Gunakan Face ID untuk membuka FinFree</string>
 	<key>CFBundleDevelopmentRegion</key>

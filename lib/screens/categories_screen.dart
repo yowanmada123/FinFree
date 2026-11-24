@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../format.dart';
 import '../icons.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
+import 'asset_screens.dart' show AmountField;
 
 class CategoriesScreen extends StatelessWidget {
   final TxType initial;
@@ -68,7 +70,8 @@ class _CatList extends StatelessWidget {
         final net = c.both ? s.categoryNet(period, c.id) : null;
         final side = type == TxType.income ? net?.income : net?.expense;
         return ListTile(
-          leading: CircleIcon(icon: c.icon, color: c.color),
+          leading: CircleIcon(
+              icon: c.icon, color: typeColor(type, context).toARGB32()),
           title: Text(c.name),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -175,6 +178,8 @@ Future<void> editCategory(BuildContext context,
   var icon = edit?.icon ?? (type == TxType.income ? 'income_other' : 'other');
   var color = edit?.color ?? kColors.first;
   var both = edit?.both ?? false;
+  final budget = TextEditingController(
+      text: edit != null && edit.budget > 0 ? formatAmountInput(edit.budget) : '');
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -190,37 +195,65 @@ Future<void> editCategory(BuildContext context,
           color: color,
           onIcon: (v) => setState(() => icon = v),
           onColor: (v) => setState(() => color = v),
-          extra: Material(
-            color: Theme.of(ctx).colorScheme.secondaryContainer,
-            borderRadius: BorderRadius.circular(14),
-            child: SwitchListTile(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-              secondary: const Icon(Icons.swap_vert_circle_rounded),
-              title: const Text('Masuk & Keluar'),
-              subtitle: const Text(
-                  'Bisa dipakai untuk pemasukan dan pengeluaran, jadi untung/rugi kategori ini terlihat. Cocok untuk usaha, proyek, arisan, dll.'),
-              value: both,
-              onChanged: (v) => setState(() => both = v),
+          extra: Column(children: [
+            Material(
+              color: Theme.of(ctx).colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(14),
+              child: SwitchListTile(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+                secondary: const Icon(Icons.swap_vert_circle_rounded),
+                title: const Text('Masuk & Keluar'),
+                subtitle: const Text(
+                    'Untuk pemasukan & pengeluaran sekaligus, jadi untung/rugi kategori ini terlihat.',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+                value: both,
+                onChanged: (v) => setState(() => both = v),
+              ),
             ),
-          ),
+            if (both || (edit?.type ?? type) == TxType.expense) ...[
+              const SizedBox(height: 12),
+              AmountField(budget, 'Anggaran pengeluaran per periode (opsional)',
+                  helper: 'Diberi peringatan saat mendekati batas'),
+            ],
+          ]),
           onSave: () async {
             final n = name.text.trim();
             if (n.isEmpty) return;
             final twin = AppStore.I.sameNameOther(
                 n, edit?.type ?? type, exceptId: edit?.id);
-            await AppStore.I.upsertCategory(Category(
+            final catType =
+                edit != null && (both || !edit.both) ? edit.type : type;
+            final c = Category(
               id: edit?.id ?? newId(),
               name: n,
-              type: edit != null && (both || !edit.both) ? edit.type : type,
+              type: catType,
               icon: icon,
               color: color,
               both: both,
-            ));
+              budget: both || catType == TxType.expense
+                  ? parseAmount(budget.text)
+                  : 0,
+            );
+            await AppStore.I.upsertCategory(c);
             if (ctx.mounted) Navigator.pop(ctx);
+            // nama sama di sisi lain → tawarkan gabung (bukan otomatis)
             if (twin != null && context.mounted) {
-              toast(context,
-                  '"$n" digabung jadi kategori Masuk & Keluar, untung/ruginya kini terhitung');
+              final side = twin.both
+                  ? 'Masuk & Keluar'
+                  : (twin.type == TxType.income ? 'Pemasukan' : 'Pengeluaran');
+              if (await confirm(
+                  context,
+                  'Gabungkan kategori?',
+                  'Sudah ada kategori "${twin.name}" di $side. Gabungkan jadi SATU kategori Masuk & Keluar supaya untung/ruginya terhitung?\n\nPilih "Tetap terpisah" bila memang ingin dibedakan.',
+                  ok: 'Gabungkan',
+                  cancel: 'Tetap terpisah')) {
+                await AppStore.I.mergeCategories(c.id, twin.id);
+                if (context.mounted) {
+                  toast(context, '"$n" kini kategori Masuk & Keluar');
+                }
+              }
             }
           },
         ),

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../store.dart';
 import '../widgets.dart';
 import 'categories_screen.dart';
+import 'debt_screens.dart';
+import 'tools_screens.dart';
 import 'lock_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -121,6 +123,23 @@ class SettingsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Pengaturan')),
       body: ListView(
         children: [
+          const _Header('Cadangan data (offline)'),
+          ListTile(
+            leading: Icon(Icons.save_alt_rounded,
+                color: backupOverdue() ? Theme.of(context).colorScheme.error : null),
+            title: const Text('Simpan cadangan ke file'),
+            subtitle: Text(backupStatus(),
+                style: backupOverdue()
+                    ? TextStyle(color: Theme.of(context).colorScheme.error)
+                    : null),
+            onTap: () => saveBackup(context),
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings_backup_restore_rounded),
+            title: const Text('Pulihkan dari file cadangan'),
+            subtitle: const Text('Untuk pindah HP / setelah instal ulang'),
+            onTap: () => restoreBackup(context),
+          ),
           const _Header('Data'),
           ListTile(
             leading: const Icon(Icons.dashboard_customize_rounded),
@@ -130,6 +149,31 @@ class SettingsScreen extends StatelessWidget {
               context,
               MaterialPageRoute(builder: (_) => const CategoriesScreen()),
             ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.savings_rounded),
+            title: const Text('Anggaran'),
+            subtitle: Text(s.budgetCategories.isEmpty
+                ? 'Batasi pengeluaran per kategori'
+                : '${s.budgetCategories.length} kategori diberi anggaran'),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const BudgetsScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.repeat_rounded),
+            title: const Text('Transaksi rutin'),
+            subtitle: Text(s.recurrings.isEmpty
+                ? 'Cicilan, tagihan, gaji yang tercatat otomatis'
+                : '${s.recurrings.where((r) => r.active).length} jadwal aktif'),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const RecurringScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.handshake_rounded),
+            title: const Text('Utang & piutang'),
+            subtitle: const Text('Pinjaman, DP pembeli, belum bayar supplier'),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const DebtsScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.event_repeat_rounded),
@@ -190,7 +234,7 @@ class SettingsScreen extends StatelessWidget {
             leading: Icon(Icons.cloud_off_rounded),
             title: Text('100% offline'),
             subtitle: Text(
-              'Semua data hanya tersimpan di perangkat ini. Tidak ada server, akun, atau sinkronisasi. Menghapus aplikasi akan menghapus seluruh data.',
+              'Semua data hanya tersimpan di perangkat ini. Tidak ada server, akun, atau sinkronisasi. Menghapus aplikasi akan menghapus seluruh data — rutin simpan cadangan ke file.',
             ),
           ),
           ListTile(

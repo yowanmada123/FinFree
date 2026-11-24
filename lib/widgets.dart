@@ -43,7 +43,19 @@ class TxTile extends StatelessWidget {
     String title;
     Widget leading;
     String sub;
-    if (t.type == TxType.transfer) {
+    if (t.debtId != null) {
+      // uang keluar/masuk karena utang-piutang (bukan pemasukan/pengeluaran)
+      final d = s.debt(t.debtId);
+      final out = t.toWalletId == null;
+      title = d == null
+          ? 'Utang/Piutang'
+          : (d.isReceivable ? 'Piutang • ${d.person}' : 'Utang • ${d.person}');
+      leading = CircleIcon(
+          icon: 'handshake',
+          color: Theme.of(context).colorScheme.tertiary.toARGB32());
+      sub = '${out ? 'Keluar dari' : 'Masuk ke'} '
+          '${s.wallet(out ? t.walletId : t.toWalletId)?.name ?? '?'}';
+    } else if (t.type == TxType.transfer) {
       final to = s.wallet(t.toWalletId);
       title = 'Transfer';
       leading = CircleIcon(
@@ -52,10 +64,13 @@ class TxTile extends StatelessWidget {
     } else {
       final c = s.category(t.categoryId);
       title = c?.name ?? 'Tanpa kategori';
-      leading = CircleIcon(icon: c?.icon ?? 'other', color: c?.color ?? 0xFF546E7A);
+      // ikon diwarnai sesuai jenis: hijau = pemasukan, merah = pengeluaran
+      leading = CircleIcon(
+          icon: c?.icon ?? 'other', color: typeColor(t.type, context).toARGB32());
       sub = w?.name ?? '';
     }
-    if (t.note.isNotEmpty) sub = '${t.note} • $sub';
+    if (t.note.isNotEmpty && t.debtId == null) sub = '${t.note} • $sub';
+    if (t.recurringId != null) sub = 'Rutin • $sub';
     if (showDate) sub = '${dfShort.format(t.date)} • $sub';
     final sign = switch (t.type) {
       TxType.income => 1,
@@ -69,7 +84,10 @@ class TxTile extends StatelessWidget {
       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis),
       trailing: Text(
-        money(sign == 0 ? t.amount : t.amount * sign, sign: sign > 0),
+        t.debtId != null
+            ? money(t.toWalletId == null ? -t.amount : t.amount,
+                sign: t.toWalletId != null)
+            : money(sign == 0 ? t.amount : t.amount * sign, sign: sign > 0),
         style: TextStyle(
           fontWeight: FontWeight.w600,
           color: typeColor(t.type, context),
@@ -171,7 +189,7 @@ class PeriodBar extends StatelessWidget {
 }
 
 Future<bool> confirm(BuildContext context, String title, String msg,
-    {String ok = 'Hapus'}) async {
+    {String ok = 'Hapus', String cancel = 'Batal'}) async {
   final r = await showDialog<bool>(
     context: context,
     builder: (c) => AlertDialog(
@@ -179,7 +197,7 @@ Future<bool> confirm(BuildContext context, String title, String msg,
       content: Text(msg),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(c, false), child: const Text('Batal')),
+            onPressed: () => Navigator.pop(c, false), child: Text(cancel)),
         FilledButton(
             onPressed: () => Navigator.pop(c, true), child: Text(ok)),
       ],
@@ -209,6 +227,69 @@ class EmptyState extends StatelessWidget {
           Icon(icon, size: 64, color: c),
           const SizedBox(height: 12),
           Text(text, textAlign: TextAlign.center, style: TextStyle(color: c)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Warna status anggaran: aman → hampir habis (≥80%) → lewat batas.
+Color budgetColor(double pct, BuildContext context) => pct >= 1
+    ? kExpenseColor
+    : pct >= 0.8
+        ? const Color(0xFFE65100)
+        : Theme.of(context).colorScheme.primary;
+
+/// Baris progres anggaran satu kategori pada periode.
+class BudgetTile extends StatelessWidget {
+  final Category c;
+  final Period period;
+  final VoidCallback? onTap;
+  const BudgetTile(
+      {super.key, required this.c, required this.period, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final spent = AppStore.I.spentIn(period, c.id);
+    final pct = c.budget > 0 ? spent / c.budget : 0.0;
+    final col = budgetColor(pct, context);
+    final left = c.budget - spent;
+    final now = DateTime.now();
+    final daysLeft = period.contains(now)
+        ? period.end.difference(DateTime(now.year, now.month, now.day)).inDays
+        : 0;
+    final tt = Theme.of(context).textTheme;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      onTap: onTap,
+      leading: CircleIcon(icon: c.icon, color: c.color),
+      title: Row(children: [
+        Expanded(
+            child: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+        Text('${(pct * 100).round()}%',
+            style: TextStyle(color: col, fontWeight: FontWeight.w700)),
+      ]),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 4),
+          LinearProgressIndicator(
+            value: pct.clamp(0.0, 1.0),
+            minHeight: 6,
+            color: col,
+            backgroundColor: col.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            left >= 0
+                ? '${money(spent)} dari ${money(c.budget)} • sisa ${money(left)}'
+                    '${daysLeft > 0 ? ' (±${money((left / daysLeft).floor())}/hari)' : ''}'
+                : 'Lewat ${money(-left)} dari anggaran ${money(c.budget)}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: tt.bodySmall?.copyWith(color: left < 0 ? kExpenseColor : null),
+          ),
         ],
       ),
     );

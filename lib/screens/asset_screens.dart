@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../format.dart';
 import '../icons.dart';
@@ -128,10 +131,10 @@ class GradientCard extends StatelessWidget {
   }
 }
 
-class _HeaderStat extends StatelessWidget {
+class HeaderStat extends StatelessWidget {
   final String label;
   final String value;
-  const _HeaderStat(this.label, this.value);
+  const HeaderStat(this.label, this.value, {super.key});
 
   @override
   Widget build(BuildContext context) => Expanded(
@@ -155,14 +158,14 @@ class _HeaderStat extends StatelessWidget {
       );
 }
 
-class _AmountField extends StatelessWidget {
+class AmountField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final String? helper;
   final bool autofocus;
   final ValueChanged<String>? onChanged;
-  const _AmountField(this.controller, this.label,
-      {this.helper, this.autofocus = false, this.onChanged});
+  const AmountField(this.controller, this.label,
+      {super.key, this.helper, this.autofocus = false, this.onChanged});
 
   @override
   Widget build(BuildContext context) => TextField(
@@ -180,11 +183,11 @@ class _AmountField extends StatelessWidget {
       );
 }
 
-class _DateField extends StatelessWidget {
+class DateField extends StatelessWidget {
   final String label;
   final DateTime value;
   final ValueChanged<DateTime> onChanged;
-  const _DateField(this.label, this.value, this.onChanged);
+  const DateField(this.label, this.value, this.onChanged, {super.key});
 
   @override
   Widget build(BuildContext context) => InkWell(
@@ -209,12 +212,13 @@ class _DateField extends StatelessWidget {
 }
 
 /// Pemilih dompet kas, dengan opsi "tidak tercatat di kas".
-class _CashWalletPicker extends StatelessWidget {
+class CashWalletPicker extends StatelessWidget {
   final String label;
   final String? value;
   final String noneLabel;
   final ValueChanged<String?> onChanged;
-  const _CashWalletPicker({
+  const CashWalletPicker({
+    super.key,
     required this.label,
     required this.value,
     required this.onChanged,
@@ -257,13 +261,18 @@ class _CashWalletPicker extends StatelessWidget {
   }
 }
 
-Widget _sheetTitle(BuildContext context, IconData icon, String title) =>
+Widget sheetTitle(BuildContext context, IconData icon, String title) =>
     Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(children: [
         Icon(icon, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: 10),
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        Expanded(
+          child: Text(title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleLarge),
+        ),
       ]),
     );
 
@@ -342,8 +351,11 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
                     Row(children: [
                       Icon(iconOf(w.icon)),
                       const SizedBox(width: 8),
-                      const Text('Nilai stok (modal)',
-                          style: TextStyle(color: Colors.white70)),
+                      const Flexible(
+                        child: Text('Nilai stok (modal)',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.white70)),
+                      ),
                     ]),
                     const SizedBox(height: 4),
                     Text(money(sum.stockValue),
@@ -353,15 +365,15 @@ class _AssetWalletScreenState extends State<AssetWalletScreen> {
                             fontWeight: FontWeight.w800)),
                     const SizedBox(height: 16),
                     Row(children: [
-                      _HeaderStat('Stok', '${sum.stockCount} barang'),
-                      _HeaderStat('Terjual', '${sum.soldCount} barang'),
+                      HeaderStat('Stok', '${sum.stockCount} unit'),
+                      HeaderStat('Terjual', '${sum.soldCount} unit'),
                     ]),
                     const SizedBox(height: 12),
                     Row(children: [
-                      _HeaderStat(
+                      HeaderStat(
                           sum.profit >= 0 ? 'Total untung' : 'Total rugi',
                           money(sum.profit.abs())),
-                      _HeaderStat('Potensi untung stok', money(sum.potential)),
+                      HeaderStat('Potensi untung stok', money(sum.potential)),
                     ]),
                   ],
                 ),
@@ -442,7 +454,7 @@ class _ItemCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(i.name,
+                        Text(i.qty > 1 ? '${i.name}  ×${i.qty}' : i.name,
                             style: tt.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.w700)),
                         if (i.detail.isNotEmpty)
@@ -460,7 +472,10 @@ class _ItemCard extends StatelessWidget {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  _mini(context, 'Modal', money(i.totalCost)),
+                  _mini(
+                      context,
+                      i.qty > 1 ? 'Modal (${money(i.unitCost)}/unit)' : 'Modal',
+                      money(i.totalCost)),
                   _mini(
                       context,
                       i.sold ? 'Terjual' : 'Target jual',
@@ -567,6 +582,7 @@ class ItemDetailScreen extends StatelessWidget {
                       ..['sellWalletId'] = null
                       ..['buyer'] = ''
                       ..['costs'] = []
+                      ..['photos'] = []
                       ..['buyDate'] = DateTime.now().toIso8601String());
                     if (!context.mounted) return;
                     await Navigator.push(
@@ -602,7 +618,7 @@ class ItemDetailScreen extends StatelessWidget {
                   children: [
                     Row(children: [
                       Expanded(
-                        child: Text(i.name,
+                        child: Text(i.qty > 1 ? '${i.name}  ×${i.qty}' : i.name,
                             style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 17,
@@ -655,14 +671,19 @@ class ItemDetailScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              PhotoStrip(item: i),
+              const SizedBox(height: 12),
 
               // ---- rincian perhitungan ----
               _Section(
                 title: 'Rincian modal & keuntungan',
                 icon: Icons.calculate_rounded,
                 children: [
-                  _line(context, 'Harga beli', money(i.buyPrice)),
+                  if (i.qty > 1)
+                    _line(context, 'Jumlah', '${i.qty} unit'),
+                  _line(context, i.qty > 1 ? 'Harga beli (total)' : 'Harga beli',
+                      money(i.buyPrice)),
                   ...i.costs.map((c) => _line(
                         context,
                         '+ ${c.name.isEmpty ? 'Biaya' : c.name}',
@@ -681,6 +702,8 @@ class ItemDetailScreen extends StatelessWidget {
                   const Divider(),
                   _line(context, 'Total modal', money(i.totalCost),
                       bold: true),
+                  if (i.qty > 1)
+                    _line(context, 'Modal per unit', money(i.unitCost)),
                   if (i.sold)
                     _line(context, 'Harga jual', money(i.sellPrice),
                         bold: true)
@@ -786,8 +809,9 @@ class ItemDetailScreen extends StatelessWidget {
                       ),
                       onPressed: () => showSellSheet(context, i),
                       icon: const Icon(Icons.sell_rounded),
-                      label: const Text('Tandai Terjual',
-                          style: TextStyle(fontSize: 16)),
+                      label: Text(
+                          i.qty > 1 ? 'Jual (stok ${i.qty})' : 'Tandai Terjual',
+                          style: const TextStyle(fontSize: 16)),
                     ),
                   ),
                 ),
@@ -902,6 +926,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
   final _supplier = TextEditingController();
   final _sell = TextEditingController();
   final _buyer = TextEditingController();
+  int _qty = 1;
   DateTime _buyDate = DateTime.now();
   DateTime _sellDate = DateTime.now();
   String? _buyWallet;
@@ -918,6 +943,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
     if (src != null) {
       _name.text = src.name;
       _detail.text = src.detail;
+      _qty = src.qty;
       _buy.text = formatAmountInput(src.buyPrice);
       _target.text = formatAmountInput(src.targetPrice);
       _supplier.text = src.supplier;
@@ -967,6 +993,8 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
       sellDate: _sold ? _sellDate : null,
       sellWalletId: _sold ? _sellWallet : null,
       buyer: _sold ? _buyer.text.trim() : '',
+      qty: _qty,
+      photos: e?.photos ?? [],
     );
     await AppStore.I.upsertItem(it);
     if (mounted) Navigator.pop(context);
@@ -1009,9 +1037,34 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
               prefixIcon: Icon(Icons.notes_rounded),
             ),
           ),
+          gap,
+          Row(children: [
+            const Icon(Icons.numbers_rounded),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Jumlah unit')),
+            IconButton.filledTonal(
+              tooltip: 'Kurangi',
+              onPressed: _qty > 1 ? () => setState(() => _qty--) : null,
+              icon: const Icon(Icons.remove_rounded),
+            ),
+            SizedBox(
+              width: 44,
+              child: Text('$_qty',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+            IconButton.filledTonal(
+              tooltip: 'Tambah',
+              onPressed: () => setState(() => _qty++),
+              icon: const Icon(Icons.add_rounded),
+            ),
+          ]),
           const SizedBox(height: 20),
           _groupLabel(context, '2', 'Pembelian (modal)'),
-          _AmountField(_buy, 'Harga beli *',
+          AmountField(_buy, _qty > 1 ? 'Harga beli total ($_qty unit) *' : 'Harga beli *',
+              helper: _qty > 1 && parseAmount(_buy.text) > 0
+                  ? '= ${rupiah((parseAmount(_buy.text) / _qty).round())} per unit'
+                  : null,
               onChanged: (_) => setState(() {})),
           if (extra > 0)
             Padding(
@@ -1022,11 +1075,11 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
           gap,
           Row(children: [
             Expanded(
-                child: _DateField('Tanggal beli', _buyDate,
+                child: DateField('Tanggal beli', _buyDate,
                     (d) => setState(() => _buyDate = d))),
           ]),
           gap,
-          _CashWalletPicker(
+          CashWalletPicker(
             label: 'Bayar pakai dompet',
             value: _buyWallet,
             noneLabel: 'Stok lama / tidak potong saldo',
@@ -1043,7 +1096,8 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
           ),
           const SizedBox(height: 20),
           _groupLabel(context, '3', 'Penjualan'),
-          _AmountField(_target, 'Target harga jual (opsional)',
+          AmountField(_target,
+              _qty > 1 ? 'Target harga jual total (opsional)' : 'Target harga jual (opsional)',
               helper: 'Untuk melihat perkiraan untung',
               onChanged: (_) => setState(() {})),
           gap,
@@ -1054,13 +1108,13 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
             onChanged: (v) => setState(() => _sold = v),
           ),
           if (_sold) ...[
-            _AmountField(_sell, 'Harga jual *',
+            AmountField(_sell, 'Harga jual *',
                 onChanged: (_) => setState(() {})),
             gap,
-            _DateField('Tanggal jual', _sellDate,
+            DateField('Tanggal jual', _sellDate,
                 (d) => setState(() => _sellDate = d)),
             gap,
-            _CashWalletPicker(
+            CashWalletPicker(
               label: 'Uang masuk ke dompet',
               value: _sellWallet,
               noneLabel: 'Tidak masuk saldo',
@@ -1178,6 +1232,8 @@ class _PreviewCard extends StatelessWidget {
 // ============================================================================
 
 Future<void> showSellSheet(BuildContext context, Item i) async {
+  var n = i.qty;
+  int defaultPrice(int n) => (i.targetPrice * n / i.qty).round();
   final price = TextEditingController(text: formatAmountInput(i.targetPrice));
   final buyer = TextEditingController();
   var date = DateTime.now();
@@ -1196,13 +1252,49 @@ Future<void> showSellSheet(BuildContext context, Item i) async {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _sheetTitle(ctx, Icons.sell_rounded, 'Jual ${i.name}'),
-              _AmountField(price, 'Harga jual',
+              sheetTitle(ctx, Icons.sell_rounded, 'Jual ${i.name}'),
+              if (i.qty > 1) ...[
+                Row(children: [
+                  const Expanded(child: Text('Jumlah terjual')),
+                  IconButton.filledTonal(
+                    tooltip: 'Kurangi',
+                    onPressed: n > 1
+                        ? () => setState(() {
+                              n--;
+                              price.text = formatAmountInput(defaultPrice(n));
+                            })
+                        : null,
+                    icon: const Icon(Icons.remove_rounded),
+                  ),
+                  SizedBox(
+                      width: 64,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('$n / ${i.qty}',
+                            style: Theme.of(ctx).textTheme.titleMedium),
+                      )),
+                  IconButton.filledTonal(
+                    tooltip: 'Tambah',
+                    onPressed: n < i.qty
+                        ? () => setState(() {
+                              n++;
+                              price.text = formatAmountInput(defaultPrice(n));
+                            })
+                        : null,
+                    icon: const Icon(Icons.add_rounded),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+              ],
+              AmountField(price, n > 1 ? 'Harga jual total ($n unit)' : 'Harga jual',
+                  helper: n > 1 && parseAmount(price.text) > 0
+                      ? '= ${rupiah((parseAmount(price.text) / n).round())} per unit'
+                      : null,
                   autofocus: true, onChanged: (_) => setState(() {})),
               const SizedBox(height: 12),
-              _DateField('Tanggal jual', date, (d) => setState(() => date = d)),
+              DateField('Tanggal jual', date, (d) => setState(() => date = d)),
               const SizedBox(height: 12),
-              _CashWalletPicker(
+              CashWalletPicker(
                 label: 'Uang masuk ke dompet',
                 value: walletId,
                 noneLabel: 'Tidak masuk saldo',
@@ -1219,7 +1311,9 @@ Future<void> showSellSheet(BuildContext context, Item i) async {
               ),
               const SizedBox(height: 16),
               _PreviewCard(
-                  cost: i.totalCost, price: parseAmount(price.text), sold: true),
+                  cost: (i.totalCost * n / i.qty).round(),
+                  price: parseAmount(price.text),
+                  sold: true),
               const SizedBox(height: 16),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
@@ -1228,20 +1322,20 @@ Future<void> showSellSheet(BuildContext context, Item i) async {
                 onPressed: () async {
                   final p = parseAmount(price.text);
                   if (p <= 0) return;
-                  i
-                    ..sold = true
-                    ..sellPrice = p
-                    ..sellDate = date
-                    ..sellWalletId = walletId
-                    ..buyer = buyer.text.trim();
-                  await AppStore.I.upsertItem(i);
+                  final sold = await AppStore.I.sellItem(i,
+                      qty: n,
+                      price: p,
+                      date: date,
+                      walletId: walletId,
+                      buyer: buyer.text.trim());
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (context.mounted) {
+                    final left = sold.id == i.id ? '' : ' • sisa stok ${i.qty}';
                     toast(
                         context,
-                        i.profit >= 0
-                            ? 'Terjual! Untung ${rupiah(i.profit)} 🎉'
-                            : 'Terjual. Rugi ${rupiah(-i.profit)}');
+                        sold.profit >= 0
+                            ? 'Terjual! Untung ${rupiah(sold.profit)} 🎉$left'
+                            : 'Terjual. Rugi ${rupiah(-sold.profit)}$left');
                   }
                 },
                 icon: const Icon(Icons.check_rounded),
@@ -1284,7 +1378,7 @@ Future<void> showCostSheet(BuildContext context, Item i,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _sheetTitle(ctx, Icons.build_circle_rounded,
+              sheetTitle(ctx, Icons.build_circle_rounded,
                   edit == null ? 'Tambah biaya' : 'Ubah biaya'),
               Wrap(
                 spacing: 8,
@@ -1305,11 +1399,11 @@ Future<void> showCostSheet(BuildContext context, Item i,
                 decoration: const InputDecoration(labelText: 'Keterangan biaya'),
               ),
               const SizedBox(height: 12),
-              _AmountField(amount, 'Nominal'),
+              AmountField(amount, 'Nominal'),
               const SizedBox(height: 12),
-              _DateField('Tanggal', date, (d) => setState(() => date = d)),
+              DateField('Tanggal', date, (d) => setState(() => date = d)),
               const SizedBox(height: 12),
-              _CashWalletPicker(
+              CashWalletPicker(
                 label: 'Dibayar dari dompet',
                 value: walletId,
                 onChanged: (v) => setState(() => walletId = v),
@@ -1367,4 +1461,144 @@ Future<void> showCostSheet(BuildContext context, Item i,
       ),
     ),
   );
+}
+
+// ============================================================================
+// Foto barang / nota (disimpan di HP, ikut di file cadangan)
+// ============================================================================
+
+class PhotoStrip extends StatelessWidget {
+  final Item item;
+  const PhotoStrip({super.key, required this.item});
+
+  Future<void> _add(BuildContext context) async {
+    final src = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera_rounded),
+            title: const Text('Ambil foto'),
+            onTap: () => Navigator.pop(c, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_rounded),
+            title: const Text('Pilih dari galeri'),
+            onTap: () => Navigator.pop(c, ImageSource.gallery),
+          ),
+        ]),
+      ),
+    );
+    if (src == null) return;
+    final x = await ImagePicker()
+        .pickImage(source: src, maxWidth: 1600, imageQuality: 80);
+    if (x == null) return;
+    final dir = await AppStore.photoDir();
+    final name = '${newId()}.jpg';
+    await File(x.path).copy('${dir.path}/$name');
+    item.photos.add(name);
+    await AppStore.I.upsertItem(item);
+  }
+
+  void _view(BuildContext context, String name) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (c) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            actions: [
+              IconButton(
+                tooltip: 'Hapus foto',
+                icon: const Icon(Icons.delete_outline_rounded),
+                onPressed: () async {
+                  if (await confirm(c, 'Hapus foto?', 'Foto ini akan dihapus.')) {
+                    item.photos.remove(name);
+                    await AppStore.I.upsertItem(item);
+                    await AppStore.I.deletePhotoIfUnused(name);
+                    if (c.mounted) Navigator.pop(c);
+                  }
+                },
+              ),
+            ],
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              maxScale: 5,
+              child: Image.file(File('${AppStore.photoPath}/$name')),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final path = AppStore.photoPath;
+    return SizedBox(
+      height: 84,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (final ph in item.photos)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: path == null ? null : () => _view(context, ph),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: path == null
+                      ? Container(
+                          width: 84,
+                          color: cs.surfaceContainerHighest,
+                          child: const Icon(Icons.image_rounded))
+                      : Image.file(File('$path/$ph'),
+                          width: 84,
+                          height: 84,
+                          fit: BoxFit.cover,
+                          cacheWidth: 250,
+                          errorBuilder: (_, _, _) => Container(
+                              width: 84,
+                              color: cs.surfaceContainerHighest,
+                              child: const Icon(Icons.broken_image_rounded))),
+                ),
+              ),
+            ),
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => _add(context),
+            child: Container(
+              width: item.photos.isEmpty ? 210 : 84,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                border: Border.all(color: cs.outlineVariant),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_a_photo_rounded, color: cs.primary),
+                  if (item.photos.isEmpty) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text('Foto barang / nota',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: cs.primary)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
